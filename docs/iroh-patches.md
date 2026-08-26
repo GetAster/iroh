@@ -1,6 +1,6 @@
 # Aster iroh/noq fork patch inventory
 
-Last audited: 2026-08-14.
+Last audited: 2026-08-27.
 
 ## 1.0.1 wave (2026-07-02) — current pins
 
@@ -19,9 +19,17 @@ from the 1.0.0 wave.
 |---|---|---|---|---|
 | `noq` | `noq-v1.0.1` | `aster-noq-v1.0.1` | `c84091f4c1d62f3c9025e40014fc2db59f239ffc` | `upgrade/noq-v1.0.1` |
 | `iroh` | `v1.0.1` | `aster-iroh-v1.0.1-p1` | `b15ae8071384f2643b46600ccfebbc2f4d36b6e9` | `upgrade/iroh-v1.0.1` |
-| `iroh-blobs` | `v0.103.0` | `aster-iroh-blobs-v0.103.1-p1` | `dfac111c61946c970c5a98e79112957f94291bc3` | `upgrade/iroh-blobs-v0.103` |
-| `iroh-docs` | `v0.101.0` | `aster-iroh-docs-v0.101.3` | `d80d7a6c612b96b5e58e9b888f63f83b74e947e1` | `upgrade/iroh-docs-v0.101` |
+| `iroh-blobs` | `v0.103.0` | `aster-iroh-blobs-v0.103.5` | `bf21d4fe409181c983a755df574754e99a0d0a60` | `upgrade/iroh-blobs-v0.103` |
+| `iroh-docs` | `v0.101.0` | `aster-iroh-docs-v0.101.4` | `f38c2a5cb140a83a1c97db4ace1063a7f67e4dfd` | `upgrade/iroh-docs-v0.101` |
 | `iroh-gossip` | `v0.101.0` | `aster-iroh-gossip-v0.101.0-p1` | `5c021f998a172b81a69669e71786e14a339fa963` | `upgrade/iroh-gossip-v0.101` |
+| `iroh-util` | `cpfix @ aef1db3` (upstream PR #5, over `iroh-util-v0.6.0`) | `aster-iroh-util-v0.6.2` | `afed9e6d07e41450fe1970e794782bab7df9c2f4` | `upgrade/iroh-util-v0.6` |
+
+(`iroh-util` was promoted from a checksum-verified bridge to a fork on
+2026-08-25 for the connection-pool deadlock; its repo lives at
+`github.com/aster-rpc/iroh-util` until the forge org repo exists. 0.6.2
+packages upstream's single-actor rewrite plus the portal-sync witness tests
+and supersedes the published-but-never-consumed 0.6.1 independent patch. See
+row 24 and the fork manifest's `[forks.iroh-util]` notes.)
 
 Port notes:
 
@@ -156,6 +164,31 @@ Port notes:
   transitive `netwatch`/`portmapper` 0.19.1 and `netdev` 0.45 per upstream's
   net-tools bump.
 
+- **2026-08-24..26 (the portal-sync cutover campaign) shipped four releases
+  outside the branch procedure, remediated 2026-08-27.** `iroh-docs 0.101.4`
+  (the AlreadySyncing wedge fix, row 22), `iroh-blobs 0.103.2`–`0.103.5` (the
+  GC sweep-custody stack, row 23) and `iroh-util 0.6.1`/`0.6.2` (row 24)
+  were committed directly on their `upgrade/*` branches with no topic
+  branches and no `-x` trailers. Topic branches were reconstructed after the
+  fact — `fix/alreadysyncing-wedge` (`dd71c384be`, stacked on
+  `fix/syncfinish` because its state-machine tests assert row 16's
+  `resync_requested`), `fix/gc-sweep-custody` (`64b1631c3e`, all four GC
+  fixes stacked on `v0.103.0`; they are textually interdependent in
+  `store/gc.rs`/`fs/meta.rs`), and `test/connection-pool-witnesses`
+  (`c6ca9970a3`, on upstream `cpfix` `aef1db3`) — each rebuilt branch
+  compiled and passed its fix's regression tests before push. **Provenance
+  direction is inverted on these three branches**: their `(cherry picked
+  from …)` trailers point at the `upgrade/*` release commits, the opposite of
+  the normal flow, because the releases existed first. The released tags and
+  registry artifacts are untouched. The stray `repro/alreadysyncing-wedge`
+  branch (a duplicate pointer at the 0.101.4 tip, not a topic branch) was
+  deleted from local and origin. 0.101.4 also skipped the fmt/clippy gates;
+  `00d1a3b9` on `upgrade/iroh-docs-v0.101` restores them.
+- `iroh-docs` gained `set_bytes_durable` (row 25, `fix/durable-set-bytes`
+  `77385ea71b`, procedure-correct: topic branch first, `-x` onto the release
+  branch as `a0192b7`). **Unreleased** — it ships with the next iroh-docs
+  release (0.101.5) when portal-sync's OI-018 publish-ordering work lands.
+
 Validation: per-fork fmt/clippy(-D warnings, --all-features --tests)/tests
 (noq-proto 385, noq 35, iroh 142 single-threaded), then downstream
 `aster_transport_core` (242) + `aster --all-features` (94) Rust tests, PyO3
@@ -175,9 +208,13 @@ End-of-cycle local worktree checkouts (for path-override consumers like
 git -C /Users/emrul/dev/aster/noq         switch --detach aster-noq-v1.0.1
 # iroh stays on upgrade/iroh-v1.0.1 (this ledger commit is one past the tag)
 git -C /Users/emrul/dev/aster/iroh        switch upgrade/iroh-v1.0.1
-git -C /Users/emrul/dev/aster/iroh-blobs  switch --detach aster-iroh-blobs-v0.103.1-p1
-git -C /Users/emrul/dev/aster/iroh-docs   switch --detach aster-iroh-docs-v0.101.3
+# blobs/docs upgrade branches sit past their tags (post-0.103.5 GC docs
+# commits; the unreleased row-25 durable set + fmt hygiene). For released-code
+# checkouts use the tags; for development use the upgrade branches.
+git -C /Users/emrul/dev/aster/iroh-blobs  switch --detach aster-iroh-blobs-v0.103.5
+git -C /Users/emrul/dev/aster/iroh-docs   switch --detach aster-iroh-docs-v0.101.4
 git -C /Users/emrul/dev/aster/iroh-gossip switch --detach aster-iroh-gossip-v0.101.0-p1
+git -C /Users/emrul/dev/aster/iroh-util   switch --detach aster-iroh-util-v0.6.2
 ```
 
 ## Historical: Windows UDP busy-loop fix (2026-07-01)
@@ -516,6 +553,10 @@ These patches affect code or dependency resolution needed by Aster.
 | 20 | `iroh-docs` | `6523891` (integration branch only — see note) | `tests/sync.rs` | Replaces the exact-completion multiset in `sync_redrives_known_missing_content_after_resync` with a semantic event collector. Phase 1 requires a neighbour, the missing-content entry, at least one successful completion and a drain, tolerating further completions in any position rather than consuming a single-use slot. Phase 2 is an ordered state machine — completion, then the expected content, then the drain — in which a drain seen before the content belongs to the previous cycle and resets the wait. Failed completions, completions from another peer, and unrelated events remain errors. | Row 16 changed the observable event sequence; this test, written two months earlier, asserted an exact event set with an origin-blind matcher. It failed ~1 run in 5 and 0.101.1 shipped it. | Low conflict risk. **Has no upstream-tag-based topic branch**, deliberately: it needs both row 14's test, an Aster addition, and row 16's behaviour, and those coexist only on the integration branch. If row 16 is ever ported, port this with it. **Do not reintroduce a partition of completions by origin or entry count** — see the release note; no such partition exists, and two attempts at one shipped or nearly shipped defects. |
 | 19 | `iroh-docs` | `d47957a` (`fix/capability-downgrade`) / `5976751` (on `upgrade/iroh-docs-v0.101`) | `src/actor.rs`, `src/api.rs`, `src/api/actor.rs`, `src/api/protocol.rs`, `src/store/fs.rs`, `src/sync.rs`, `tests/sync.rs` | Adds `DocsApi::retire_write_authority(doc_id)`, narrowing a namespace's stored capability from Write to Read **without deleting entries**, refusing with an outstanding-reference count while handles remain, and reporting the capability kind now stored rather than the one requested. | Aster exposes this as `Docs::retire_local_write_authority`; portal-sync needs a non-destructive Write-to-Read transition for its grant lifecycle, and neither importing Read (capability merge only upgrades) nor dropping the document (loses entries) can provide one. | Medium conflict risk in the replica open/capability path. Preserve all three properties together: entries survive, the narrowed capability is durable across restart, and a later write import widens again. This is local authority retirement, not cryptographic revocation — a peer holding the namespace secret still writes. |
 | 18 | `iroh-docs` | `2761364d` (`fix/replica-event-backpressure`) / `905d4bc` (on `upgrade/iroh-docs-v0.101`) | `src/engine/live.rs` | Makes the live actor's own replica-event channel unbounded. `Subscribers::send` delivers into it with a blocking `tx.send(..).await` executed **inside the sync actor**, so bounding it means a lagging subscriber stops the single actor servicing replica requests. | Completes row 13, which established this exact invariant for the subscription channels and missed this sibling. portal-sync's shape — one large granted Tree syncing beside a small policy namespace — is precisely the burst that overruns the bound. | Low conflict risk (one channel constructor). Preserve the invariant, not the line: bound work per tick via `MAX_REPLICA_EVENT_BATCH`, never the channel's capacity. `sync_large_read_import_after_peer_initiated_race` is the regression; it stalls at exactly 1027 of 2000 events when the channel is bounded. |
+| 22 | `iroh-docs` | `dd71c384be` tip of `fix/alreadysyncing-wedge` / `287ef24`+`f38c2a5` (on `upgrade/iroh-docs-v0.101`, released as **0.101.4**) | `src/engine/live.rs`, `src/engine/state.rs`, `tests/sync_alreadysyncing_wedge.rs` | A connect rejected by the remote as `AlreadySyncing` left `PeerState` in `Running{Connect}` forever, refusing every later attempt as already running — the peer wedged until restart. The fix lets the rejected connect's own abort reset the state while a stale abort arriving after a reciprocal accept has taken ownership must NOT erase that live exchange. | portal-sync daemons dial trees at startup and on grant changes; two daemons connecting to each other simultaneously hit the AlreadySyncing rejection routinely. | Medium conflict risk in the per-peer sync state machine. **Backfilled branch, stacked on `fix/syncfinish`** (its unit tests assert row 16's `resync_requested`); port rows 16 and 22 together. Trailers point upgrade-ward (branch reconstructed after release). Three deterministic unit tests in `engine::state` plus the two-node integration wedge test pin the behaviour. |
+| 23 | `iroh-blobs` | `64b1631c3e` tip of `fix/gc-sweep-custody` / `188c4555`..`bf21d4fe` (on `upgrade/iroh-blobs-v0.103`, released as **0.103.2–0.103.5**) | `src/store/gc.rs`, `src/store/fs.rs`, `src/store/fs/meta.rs`(+`/proto`), `src/api/{blobs,proto,tags}.rs`, `src/util/temp_tag.rs`, `src/store/{mem,readonly_mem}.rs` | Four stacked GC fixes: (1) a tag created after the sweep's mark joins the in-flight sweep's delete-time protection (the DeleteBlobs dispatch filters live temp tags in the actor, linearizing tag creation against the sweep); (2) HashSeq custody protects the children too, via `AddProtected`; (3) an unenumerable HashSeq claim poisons the in-flight sweep (`Protection::sweep_poisoned`) instead of letting it delete members nobody can enumerate; (4) every collection root is traversed, novel hash or not. | portal-sync's retention tags + `gc_run_once` cadence exercise exactly these windows; the K-matrix dedupe-untag and blob-retention scenarios are the downstream regressions. | Medium conflict risk against the batch-API rows 6/7 (shared import lists and command enums in `fs/meta`). **Backfilled branch, single stack on `v0.103.0`** — the four commits are textually interdependent; port as a unit, in order. Trailers point upgrade-ward. 12 GC tests (`store::gc::tests`, mem+fs) pin all four behaviours. |
+| 24 | `iroh-util` | `aef1db3` (upstream `cpfix`) + `c6ca9970a3` tip of `test/connection-pool-witnesses` / `396759d`+`afed9e6` (on `upgrade/iroh-util-v0.6`, released as **0.6.2**) | `src/connection_pool.rs` | Adopts upstream's single-actor `ConnectionPool` rewrite (n0-computer/iroh-util PR #5), replacing the 0.6.0 design whose two blocking-send cycles deadlocked the pool at >100 concurrent `get_or_connect` (portal-sync's freeze-apply-window wedge). Adds three Aster witness tests: 300-connect burst resolves under saturation, pool-drop terminates the actor and closes held connections, and slow-peer backlogs do not starve an unrelated peer. | Every portal-sync blob fetch and docs sync dial goes through this pool; the deadlock silently froze whole daemons. | Watch upstream: when a released iroh-util ≥0.6.x contains PR #5, this fork collapses back to a bridge carrying only the witness tests. The independent Aster 0.6.1 fix (`fc724bd`, tag `aster-iroh-util-v0.6.1`) is published-but-never-consumed, preserved for the record — do not consume or republish it. |
+| 25 | `iroh-docs` | `77385ea71b` (`fix/durable-set-bytes`) / `a0192b7` (on `upgrade/iroh-docs-v0.101`, **unreleased** — ships in 0.101.5) | `src/api.rs`, `src/api/actor.rs`, `src/api/protocol.rs`, `tests/durable_set_crash.rs` | Adds `Doc::set_bytes_durable`: `add_bytes` → `sync_db` → `insert_local`. The blob store acknowledges imports inside an open write batch and commits later, so plain `set_bytes` can leave a durable document record naming blob metadata that was never committed after a hard kill (measured: reopen reports `NotFound` for the published hash). The barrier is a top-level blob-store command, so it also retroactively commits every earlier import on the same store — one call gives whole-pipeline ordering for import-payloads-then-publish-record flows. `set_hash` deliberately unchanged (reference-without-content contract). New `SetDurable` protocol variant added at the enum tail (positional serialization). | portal-sync's publish pipeline (portal-cas manifest writes) needs the record-never-dangles direction for OI-018; the reverse crash window self-heals by rescan. | Low conflict risk (additive API). The crash witness (`tests/durable_set_crash.rs`) SIGKILLs a child on the ack and reopens the blob store demanding `Complete`, five rounds; `DURABLE_CRASH_MODE=plain` reproduces the dangling state as a manual diagnostic. Not a power-loss guarantee for data files. |
 
 ## Bookkeeping and documentation patches
 

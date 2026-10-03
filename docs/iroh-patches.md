@@ -21,24 +21,46 @@ rows are copied from the pins `aster-rpc-internal/Cargo.toml` already carries.
 
 | Repo | Upstream base | Aster tag | Pinned fork commit | Branch |
 |---|---|---|---|---|
-| `noq` | `noq-v1.3.0` | `aster-noq-v1.3.0` | `67c1364453a48de3ef9141f339f3ab0697b39de5` | `upgrade/noq-v1.3.0` |
-| `iroh` | `v1.3.0` | `aster-iroh-v1.3.0` | `0a7036826267a91c5e34b8fa0e8d3c10522b84a2` | `upgrade/iroh-v1.3.0` |
-| `iroh-blobs` | `v0.103.0` | `aster-iroh-blobs-v0.103.5` | `bf21d4fe409181c983a755df574754e99a0d0a60` | `upgrade/iroh-blobs-v0.103` |
-| `iroh-docs` | `v0.101.0` | `aster-iroh-docs-v0.101.5` | `0db8c5cc05f62e2fd13f6dc6079cf5237767ec83` | `upgrade/iroh-docs-v0.101` |
-| `iroh-gossip` | `v0.101.0` | `aster-iroh-gossip-v0.101.0-p1` | `5c021f998a172b81a69669e71786e14a339fa963` | `upgrade/iroh-gossip-v0.101` |
+| `noq` | `noq-v1.3.0` | `aster-noq-v1.3.1` | `867a3a9a33cc75436a52272ee49ba34a007a957b` | `upgrade/noq-v1.3.0` |
+| `iroh` | `v1.3.0` | `aster-iroh-v1.3.0-p1` | `1974e95825313f09e0870ef5bef11c6bc9fd97d9` | `upgrade/iroh-v1.3.0` |
+| `iroh-blobs` | `v0.103.0` | `aster-iroh-blobs-v0.103.5-p2` | `b535aa30ae61f82a1b048015817bf4365862ce62` | `upgrade/iroh-blobs-v0.103` |
+| `iroh-docs` | `v0.101.0` | `aster-iroh-docs-v0.101.5-p1` | `ad88873ed57b1e7550ef8e091d0d7f0a947e3678` | `upgrade/iroh-docs-v0.101` |
+| `iroh-gossip` | `v0.101.0` | `aster-iroh-gossip-v0.101.0-p2` | `de100e9aa59386e39a32d6744bd902935c16fcf6` | `upgrade/iroh-gossip-v0.101` |
 | `iroh-util` | `cpfix @ aef1db3` (upstream PR #5, over `iroh-util-v0.6.0`) | `aster-iroh-util-v0.6.2` | `afed9e6d07e41450fe1970e794782bab7df9c2f4` | `upgrade/iroh-util-v0.6` |
 
 `iroh-docs` 0.101.5 (`0db8c5cc`, tag `aster-iroh-docs-v0.101.5`) is the
 released form of row 25 (`set_bytes_durable`) plus the rustfmt hygiene commit
 `00d1a3b`; row 25 is no longer unreleased.
 
-**Deferred bookkeeping:** the satellites' own `[patch.crates-io]` blocks
-(iroh-blobs, iroh-docs, iroh-gossip) still name the 1.0.1-wave iroh
-(`b15ae807`) and noq (`c84091f4`) revs. Aster's product graph is unaffected
-(its root `[patch.crates-io]` overrides them) and registry consumers never see
-those blocks, so this is not required for the release; sweep them in
-dependency order (`iroh-blobs` → `iroh-docs`/`iroh-gossip`) on the next
-satellite release.
+**Follow-up (same day): noq 1.3.1 and the satellite re-pins.** Re-pinning the
+satellites exposed a noq 1.3.0 regression: iroh-docs `tests/sync.rs`
+(`sync_simple`, `test_sync_via_relay`,
+`sync_redrives_known_missing_content_after_resync`) failed every sync's
+accept-side close with `Read(ClosedStream)`. Upstream #794 made `read_to_end`
+query proto's ordered mode before the wrapper's `all_data_read` flag, and proto
+frees a stream once its FIN is read, so draining an already-finished stream
+with `read_to_end(0)` (iroh-docs' close sequence) errored instead of returning
+an empty buffer. A stored reset was masked the same way. Upstream `main`
+(`5af2505d9`) has no fix. noq 1.3.1 carries one (rows below), since noq 1.3.0
+was already published. iroh `1974e958` (`aster-iroh-v1.3.0-p1`) only re-pins
+noq, so iroh stays 1.3.0; its `noq = "1.3.0"` requirement admits 1.3.1.
+
+The satellites' own `[patch.crates-io]` blocks now name iroh `1974e958` and noq
+`867a3a9a` (iroh-docs also names iroh-blobs `b535aa30`). These are lock and pin
+changes only, with no source changes, so their crate versions are unchanged
+and the publisher skips them as identical. iroh-blobs also has an intermediate
+`aster-iroh-blobs-v0.103.5-p1` (`712ce693`) on noq 1.3.0. It was superseded the
+same day, so don't pin it. Gotcha: `cargo update -p iroh` alone kept the
+crates.io iroh 1.0.2 and reported the patches as unused. Temporarily requiring
+`iroh = "1.3.0"` and running `cargo update -p <crate>` moved the transitive
+dependencies; restoring the original spec keeps that lock.
+
+Validation: noq lib 37 (3 ignored), including the new
+`read_to_end_after_end_of_stream_is_empty`, and clippy `-D warnings`; iroh
+clippy and lib tests 124 single-threaded; iroh-blobs 133, iroh-docs 118 (sync
+27/27 twice) and iroh-gossip 25, each with clippy clean. iroh-blobs'
+`cargo fmt --check` reports existing drift in its GC patch code, which these
+commits don't touch.
 
 ### noq stack (`upgrade/noq-v1.3.0`, base `noq-v1.3.0` `c1f411562`)
 
@@ -50,6 +72,8 @@ satellite release.
 | `c15dc5544` | fix: address rust 1.96 clippy lints in read_into and poll_driver patches | `-x` of `c84091f4c` |
 | `30c50860c` | fix(noq): split GSO batches and surface peer-opened streams in poll_driver | new (row 2) |
 | `67c136445` | test(noq): cover read_into edge cases and poll_driver loopback | new |
+| `5d67f7195` | fix(noq): read_to_end after end of stream returns empty, not ClosedStream | new (regression in upstream #794) |
+| `867a3a9a3` | chore: release 1.3.1 with the read_to_end end-of-stream fix | new |
 
 Fork `main` was fast-forwarded to upstream `main` (`5af2505d9`, no force) and
 the upstream `noq-v1.3.0` tag was mirrored to Forgejo.
@@ -63,6 +87,7 @@ the upstream `noq-v1.3.0` tag was mirrored to Forgejo.
 | `52e3ef017c` | fix(socket): throttle transport recv-error logging to prevent log flood | `-x` of `4114c449c5` (row 5, conflict, below) |
 | `6db27d8eeb` | chore: run cargo fmt after iroh 1.0.1 patch port | `-x` of `32921714bb` |
 | `0a70368262` | build: resolve noq from the Aster 1.3.0 fork | new (row 3); replaces the 1.0.1-wave `a9c547549e`/`ae7e3ae989`/`c29bcd6ce2`/`5228d64d91`/`b15ae80713` patch, pin, lock and URL commits |
+| `1974e95825` | build: resolve noq from the Aster 1.3.1 fork | new (row 3) |
 
 Fork `main` was fast-forwarded to upstream `main` (`b4c8fc68ef`, no force) and
 the upstream `v1.3.0` tag was mirrored to Forgejo.
@@ -173,9 +198,9 @@ from the 1.0.0 wave.
 |---|---|---|---|---|
 | `noq` | `noq-v1.0.1` | `aster-noq-v1.0.1` | `c84091f4c1d62f3c9025e40014fc2db59f239ffc` | `upgrade/noq-v1.0.1` |
 | `iroh` | `v1.0.1` | `aster-iroh-v1.0.1-p1` | `b15ae8071384f2643b46600ccfebbc2f4d36b6e9` | `upgrade/iroh-v1.0.1` |
-| `iroh-blobs` | `v0.103.0` | `aster-iroh-blobs-v0.103.5` | `bf21d4fe409181c983a755df574754e99a0d0a60` | `upgrade/iroh-blobs-v0.103` |
+| `iroh-blobs` | `v0.103.0` | `aster-iroh-blobs-v0.103.5-p2` | `b535aa30ae61f82a1b048015817bf4365862ce62` | `upgrade/iroh-blobs-v0.103` |
 | `iroh-docs` | `v0.101.0` | `aster-iroh-docs-v0.101.4` | `f38c2a5cb140a83a1c97db4ace1063a7f67e4dfd` | `upgrade/iroh-docs-v0.101` |
-| `iroh-gossip` | `v0.101.0` | `aster-iroh-gossip-v0.101.0-p1` | `5c021f998a172b81a69669e71786e14a339fa963` | `upgrade/iroh-gossip-v0.101` |
+| `iroh-gossip` | `v0.101.0` | `aster-iroh-gossip-v0.101.0-p2` | `de100e9aa59386e39a32d6744bd902935c16fcf6` | `upgrade/iroh-gossip-v0.101` |
 | `iroh-util` | `cpfix @ aef1db3` (upstream PR #5, over `iroh-util-v0.6.0`) | `aster-iroh-util-v0.6.2` | `afed9e6d07e41450fe1970e794782bab7df9c2f4` | `upgrade/iroh-util-v0.6` |
 
 (`iroh-util` was promoted from a checksum-verified bridge to a fork on
@@ -420,7 +445,7 @@ the tag stays code-only.
 | `iroh` | `v1.0.0` | `aster-iroh-v1.0.0` | `3c329f0c350b98a772bccdf697bfcc519fcdf25a` | `upgrade/iroh-v1.0.0` |
 | `iroh-blobs` | `v0.103.0` | `aster-iroh-blobs-v0.103.0` | `60d098c99d6a759b5b1bf0df635b149b50c74775` | `upgrade/iroh-blobs-v0.103` |
 | `iroh-docs` | `v0.101.0` | `aster-iroh-docs-v0.101.0-p1` | `d9c091511de89a3e1310b23072804118822cebb6` | `upgrade/iroh-docs-v0.101` |
-| `iroh-gossip` | `v0.101.0` | `aster-iroh-gossip-v0.101.0-p1` | `5c021f998a172b81a69669e71786e14a339fa963` | `upgrade/iroh-gossip-v0.101` |
+| `iroh-gossip` | `v0.101.0` | `aster-iroh-gossip-v0.101.0-p2` | `de100e9aa59386e39a32d6744bd902935c16fcf6` | `upgrade/iroh-gossip-v0.101` |
 
 Patch stacks carried forward unchanged from the rc.1 cycle (all cherry-picked
 clean except `iroh-blobs`/`iroh-docs` Cargo.lock regen and a trailing-EOF

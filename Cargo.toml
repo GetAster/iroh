@@ -58,3 +58,8 @@ trait_method_marked_deprecated = { required-update = "minor" }
 type_associated_const_marked_deprecated = { required-update = "minor" }
 type_marked_deprecated = { required-update = "minor" }
 type_method_marked_deprecated = { required-update = "minor" }
+
+[patch.crates-io]
+noq = { git = "https://forge.emrul.dev/Aster/noq.git", rev = "67c1364453a48de3ef9141f339f3ab0697b39de5" }
+noq-udp = { git = "https://forge.emrul.dev/Aster/noq.git", rev = "67c1364453a48de3ef9141f339f3ab0697b39de5" }
+noq-proto = { git = "https://forge.emrul.dev/Aster/noq.git", rev = "67c1364453a48de3ef9141f339f3ab0697b39de5" }

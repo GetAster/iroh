@@ -96,9 +96,10 @@ impl crypto::HandshakeTokenKey for RustlsTokenKey {
 pub(crate) struct Blake3HmacKey([u8; 32]);
 
 impl Blake3HmacKey {
-    pub(crate) fn new(rng: &mut impl rand::CryptoRng) -> Self {
-        let mut key = [0u8; 32];
-        rng.fill_bytes(&mut key);
+    /// Uses `key` as the BLAKE3 keyed-hash key.
+    ///
+    /// The caller derives `key`; never pass a signing key here.
+    pub(crate) fn from_key(key: [u8; 32]) -> Self {
         Self(key)
     }
 }

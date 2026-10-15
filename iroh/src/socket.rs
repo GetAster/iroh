@@ -144,6 +144,50 @@ pub(crate) const MAX_MULTIPATH_PATHS: u32 = 8;
 /// value.
 pub(crate) const MAX_QNT_ADDRESSES: u8 = 32;
 
+/// BLAKE3 `derive_key` context for the QUIC stateless reset key, see [`noq_endpoint_config`].
+const STATELESS_RESET_KEY_CONTEXT: &str = "iroh stateless reset key v1";
+
+/// BLAKE3 `derive_key` context for the connection ID check key, see [`noq_endpoint_config`].
+const CONNECTION_ID_KEY_CONTEXT: &str = "iroh connection id key v1";
+
+/// Builds the noq endpoint config, with its keys derived from the endpoint's secret key.
+///
+/// A QUIC endpoint that receives a packet for a connection it does not know answers with a
+/// stateless reset (RFC 9000 §10.3), which closes that connection at the peer at once. That is
+/// what happens when an endpoint is killed without sending CONNECTION_CLOSE and restarts: the
+/// peer's packets for its old connections reach the new process, which resets them. Without
+/// it the peer keeps those dead connections open until the QUIC idle timeout (30 s), and hands
+/// them out for new work in the meantime.
+///
+/// For that the new process needs two keys its previous process had, so both are derived
+/// from the secret key, the one thing a restarted endpoint keeps:
+/// - the stateless reset key, which signs the reset token the peer validates; a random key
+///   per process produces tokens the peer rejects, so the reset is ignored;
+/// - the key of noq's [`HashedConnectionIdGenerator`], which only answers packets whose
+///   connection ID passes its keyed check; with a random key the new process drops the old
+///   connection IDs as invalid and sends nothing.
+///
+/// Trade-off: anyone who holds the secret key can compute this endpoint's reset tokens and so
+/// close its connections. They can already impersonate the endpoint, which is strictly more.
+/// The keys come from BLAKE3 `derive_key` with their own context strings, so neither is the
+/// signing key, and neither reveals the secret key or the other derived key. The connection
+/// ID check is not a security boundary: it only keeps noq from answering random traffic.
+///
+/// [`HashedConnectionIdGenerator`]: noq_proto::HashedConnectionIdGenerator
+fn noq_endpoint_config(secret_key: &SecretKey) -> noq::EndpointConfig {
+    let mut secret = secret_key.to_bytes();
+    let reset_key = blake3::derive_key(STATELESS_RESET_KEY_CONTEXT, &secret);
+    let cid_key = blake3::derive_key(CONNECTION_ID_KEY_CONTEXT, &secret);
+    secret.fill(0);
+    let cid_key = u64::from_le_bytes(cid_key[..8].try_into().expect("8 bytes"));
+
+    let mut config = noq::EndpointConfig::new(Arc::new(Blake3HmacKey::from_key(reset_key)));
+    config.cid_generator(Arc::new(move || {
+        Box::new(noq_proto::HashedConnectionIdGenerator::from_key(cid_key))
+    }));
+    config
+}
+
 /// Error returned when the endpoint state actor stopped while waiting for a reply.
 #[stack_error(add_meta, derive)]
 #[error("endpoint state actor stopped")]
@@ -1008,8 +1052,7 @@ impl EndpointInner {
             span: span.clone(),
         });
 
-        let mut endpoint_config =
-            noq::EndpointConfig::new(Arc::new(Blake3HmacKey::new(&mut rand::rng())));
+        let mut endpoint_config = noq_endpoint_config(&secret_key);
         // Setting this to false means that noq will ignore packets that have the QUIC fixed bit
         // set to 0. The fixed bit is the 3rd bit of the first byte of a packet.
         // For performance reasons and to not rewrite buffers we pass non-QUIC UDP packets straight
@@ -2880,5 +2923,218 @@ mod tests {
 
         // TODO: could remove the addresses again, send, add it back and see it recover.
         // But we don't have that much private access to the RemoteMap.  This will do for now.
+    }
+}
+
+#[cfg(test)]
+mod stateless_reset_tests {
+    use std::time::{Duration, Instant};
+
+    use n0_tracing_test::traced_test;
+
+    use super::{CONNECTION_ID_KEY_CONTEXT, STATELESS_RESET_KEY_CONTEXT};
+    use crate::{
+        Endpoint, EndpointAddr, RelayMode, SecretKey,
+        endpoint::{Builder, Connection, ConnectionError, presets},
+        tls::CaTlsConfig,
+    };
+
+    const ALPN: &[u8] = b"n0/test/reset";
+
+    /// How long the peer may keep the old connection after it sends the restarted endpoint
+    /// a packet for it. A reset takes about a millisecond on loopback; without one the peer
+    /// waits for the 30 s idle timeout, or, with noq before 1.3.2 and a direct path selected,
+    /// about 5 s until a packet on the relay path (path 0) draws a reset noq accepts.
+    const PROMPTLY: Duration = Duration::from_secs(2);
+
+    #[test]
+    fn derived_keys_are_stable_and_distinct() {
+        let secret = SecretKey::from_bytes(&[7; 32]);
+        let derive =
+            |context: &str, secret: &SecretKey| blake3::derive_key(context, &secret.to_bytes());
+        let reset = derive(STATELESS_RESET_KEY_CONTEXT, &secret);
+        let cid = derive(CONNECTION_ID_KEY_CONTEXT, &secret);
+
+        assert_eq!(reset, derive(STATELESS_RESET_KEY_CONTEXT, &secret.clone()));
+        assert_ne!(reset, cid);
+        assert_ne!(
+            reset,
+            secret.to_bytes(),
+            "the reset key must never be the signing key"
+        );
+        assert_ne!(cid, secret.to_bytes());
+        let other = SecretKey::from_bytes(&[8; 32]);
+        assert_ne!(reset, derive(STATELESS_RESET_KEY_CONTEXT, &other));
+    }
+
+    /// How the peer reaches the endpoint that restarts.
+    #[derive(Debug, Clone, Copy)]
+    enum Reach {
+        /// Relays disabled; the endpoint comes back on the same local port.
+        SamePort,
+        /// Relay only; the endpoint comes back on the same relay, which routes by endpoint ID.
+        SameRelay,
+        /// The connection starts on the relay and then selects a direct path, the usual case
+        /// with relays on. The endpoint comes back on the same relay and port.
+        RelayThenDirect,
+    }
+
+    /// An endpoint killed without sending CONNECTION_CLOSE restarts with the same secret
+    /// key. The peer's old connection must close by stateless reset as soon as the restarted
+    /// endpoint receives a packet for it, rather than at the 30 s idle timeout.
+    async fn restarted_endpoint_resets_old_connection(reach: Reach) {
+        let (relay_map, relay_url, _relay_guard) =
+            crate::test_utils::run_relay_server().await.unwrap();
+        let builder = move |port: u16| -> Builder {
+            let builder = Endpoint::builder(presets::Minimal)
+                .ca_tls_config(CaTlsConfig::insecure_skip_verify())
+                .alpns(vec![ALPN.to_vec()]);
+            match reach {
+                Reach::SamePort => builder
+                    .relay_mode(RelayMode::Disabled)
+                    .clear_ip_transports()
+                    .bind_addr((std::net::Ipv4Addr::LOCALHOST, port))
+                    .unwrap(),
+                Reach::SameRelay => builder
+                    .relay_mode(RelayMode::Custom(relay_map.clone()))
+                    .clear_ip_transports(),
+                Reach::RelayThenDirect => builder
+                    .relay_mode(RelayMode::Custom(relay_map.clone()))
+                    .clear_ip_transports()
+                    .bind_addr((std::net::Ipv4Addr::LOCALHOST, port))
+                    .unwrap(),
+            }
+        };
+        let dial_addr = move |ep: &Endpoint| -> EndpointAddr {
+            match reach {
+                Reach::SamePort => EndpointAddr::new(ep.id()).with_ip_addr(ep.bound_sockets()[0]),
+                Reach::SameRelay | Reach::RelayThenDirect => {
+                    EndpointAddr::new(ep.id()).with_relay_url(relay_url.clone())
+                }
+            }
+        };
+        async fn serve(ep: Endpoint) {
+            let mut held: Vec<Connection> = Vec::new();
+            while let Some(incoming) = ep.accept().await {
+                if let Ok(conn) = incoming.await {
+                    held.push(conn);
+                }
+            }
+        }
+
+        // The host runs in its own runtime, so it can vanish without sending
+        // CONNECTION_CLOSE: shutting the runtime down drops every connection and endpoint
+        // driver without polling it again, so nothing is sent, like kill -9.
+        let host_key = SecretKey::generate();
+        let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
+        let (kill_tx, kill_rx) = tokio::sync::oneshot::channel::<()>();
+        let old_host = {
+            let host = builder(0).secret_key(host_key.clone());
+            let dial_addr = dial_addr.clone();
+            std::thread::spawn(move || {
+                let rt = tokio::runtime::Runtime::new().unwrap();
+                let ep = rt.block_on(async move {
+                    let ep = host.bind().await.unwrap();
+                    if !matches!(reach, Reach::SamePort) {
+                        ep.online().await;
+                    }
+                    tokio::spawn(serve(ep.clone()));
+                    ready_tx
+                        .send((
+                            dial_addr(&ep),
+                            ep.bound_sockets().first().map_or(0, |a| a.port()),
+                        ))
+                        .unwrap();
+                    kill_rx.await.ok();
+                    ep
+                });
+                // Drops every task without polling it again, and waits until they are gone.
+                rt.shutdown_timeout(Duration::from_secs(2));
+                // Releases the socket so the new process can bind the same port.
+                drop(ep);
+            })
+        };
+        let (old_addr, port) = ready_rx.await.unwrap();
+
+        let client = builder(0).bind().await.unwrap();
+        if !matches!(reach, Reach::SamePort) {
+            client.online().await;
+        }
+        let old_conn = client.connect(old_addr, ALPN).await.unwrap();
+        if let Reach::RelayThenDirect = reach {
+            let direct = tokio::time::timeout(Duration::from_secs(10), async {
+                loop {
+                    if old_conn
+                        .paths()
+                        .iter()
+                        .any(|p| p.is_selected() && p.remote_addr().is_ip())
+                    {
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                }
+            })
+            .await;
+            assert!(
+                direct.is_ok(),
+                "the connection never selected a direct path"
+            );
+        }
+
+        kill_tx.send(()).unwrap();
+        tokio::task::spawn_blocking(move || old_host.join().unwrap())
+            .await
+            .unwrap();
+        assert!(
+            old_conn.close_reason().is_none(),
+            "old connection closed early"
+        );
+
+        // Same identity, same port and relay, new process.
+        let host = builder(port).secret_key(host_key).bind().await.unwrap();
+        assert_eq!(
+            host.bound_sockets().first().map_or(0, |a| a.port()),
+            port,
+            "restarted on another port"
+        );
+        if !matches!(reach, Reach::SamePort) {
+            host.online().await;
+        }
+        tokio::spawn(serve(host.clone()));
+
+        // Any packet on the old connection now reaches the new process.
+        let start = Instant::now();
+        let mut send = old_conn.open_uni().await.unwrap();
+        send.write_all(b"are you there?").await.ok();
+        let closed = tokio::time::timeout(PROMPTLY, old_conn.closed()).await;
+        println!(
+            "{reach:?}: old connection closed after {:?}: {closed:?}",
+            start.elapsed()
+        );
+        let reason = closed.unwrap_or_else(|_| {
+            panic!("old connection still open {PROMPTLY:?} after the restart ({reach:?})")
+        });
+        assert!(
+            matches!(reason, ConnectionError::Reset),
+            "closed by {reason:?}, not by a stateless reset ({reach:?})"
+        );
+    }
+
+    #[tokio::test]
+    #[traced_test]
+    async fn restarted_endpoint_resets_old_connection_same_port() {
+        restarted_endpoint_resets_old_connection(Reach::SamePort).await
+    }
+
+    #[tokio::test]
+    #[traced_test]
+    async fn restarted_endpoint_resets_old_connection_same_relay() {
+        restarted_endpoint_resets_old_connection(Reach::SameRelay).await
+    }
+
+    #[tokio::test]
+    #[traced_test]
+    async fn restarted_endpoint_resets_old_connection_relay_then_direct() {
+        restarted_endpoint_resets_old_connection(Reach::RelayThenDirect).await
     }
 }

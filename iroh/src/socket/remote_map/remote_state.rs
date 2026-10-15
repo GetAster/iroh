@@ -19,7 +19,7 @@ use n0_watcher::Watcher;
 use noq::{Closed, PathStats, PathStatus, WeakConnectionHandle};
 use noq_proto::{PathError, PathEvent as NoqPathEvent, PathId, n0_nat_traversal};
 use rustc_hash::FxHashMap;
-use smallvec::{SmallVec, smallvec};
+use smallvec::SmallVec;
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 use tracing::{Instrument, Level, Span, debug, error, event, info_span, instrument, trace, warn};
@@ -485,10 +485,9 @@ impl RemoteStateActor {
             self.state.metrics.num_conns_closed.inc();
             conn_state.path_state.close(closed);
         }
-        if self.connections.is_empty() {
-            trace!("last connection closed - clearing selected_path");
-            self.state.selected_path = None;
-        }
+        // The closed connection may have been the only one with the selected path open.
+        // Re-select from the remaining connections, or clear it (n0-computer/iroh#4600).
+        self.select_path();
     }
 
     /// Updates the local [`DirectAddr`]s to all connections.
@@ -651,6 +650,22 @@ impl RemoteStateActor {
     /// direct paths are closed for all connections.
     #[instrument(skip_all)]
     fn select_path(&mut self) {
+        // A selected path that no connection has open any more (its connection closed or
+        // the path was abandoned) must not stay selected: new connections would keep
+        // sending to it.  Drop it so the selector picks freely, or we fall back to all
+        // known paths (n0-computer/iroh#4600).
+        if let Some(selected) = self.state.selected_path.as_ref()
+            && !self
+                .connections
+                .values()
+                .any(|conn| conn.paths.values().any(|path| path == selected))
+        {
+            debug!(
+                ?selected,
+                "selected path no longer open - clearing selected_path"
+            );
+            self.state.selected_path = None;
+        }
         let current_path = self.state.selected_path.as_ref();
         let selected_addr = {
             let ctx = PathSelectionContext::new(current_path, &self.connections);
@@ -802,24 +817,32 @@ impl State {
         // though we might not have a relay transport or ip-capable transport set up.
         // So these errors must not be fatal for this actor (or even this operation).
 
-        let targets = if let Some(addr) = self.selected_path.as_ref() {
-            trace!(?addr, "sending datagram to selected path");
+        // These are the handshake packets of a new connection.  The selected path was
+        // validated by another connection, which may be talking to a dead instance of
+        // the remote (n0-computer/iroh#4600).  So send to the selected path first and
+        // then to every other known path, as when no path is selected.
+        let selected = self.selected_path.as_ref().map(|path| path.remote());
+        let targets = {
+            trace!(
+                ?selected,
+                paths = ?self.paths.addrs().collect::<Vec<_>>(),
+                "sending datagram to selected path and all known paths",
+            );
+            if selected.is_none() && self.paths.is_empty() {
+                warn!("Cannot send datagrams: No paths to remote endpoint known");
+            }
 
             // TODO(Frando): We might want to include a local IP here in the future, if we confidently
             // know that it is the correct one.
             // See https://github.com/n0-computer/iroh/issues/4280.
-            smallvec![transports::FourTuple::from_remote(addr.remote())]
-        } else {
-            trace!(
-                paths = ?self.paths.addrs().collect::<Vec<_>>(),
-                "sending datagram to all known paths",
-            );
-            if self.paths.is_empty() {
-                warn!("Cannot send datagrams: No paths to remote endpoint known");
-            }
-
-            let mut targets = SmallVec::new();
+            let mut targets: SmallVec<[transports::FourTuple; 8]> = selected
+                .iter()
+                .map(|addr| transports::FourTuple::from_remote(addr.clone()))
+                .collect();
             for addr in self.paths.addrs() {
+                if selected.as_ref() == Some(addr) {
+                    continue;
+                }
                 // We never want to send to our local addresses.
                 // The local address set is updated in the main loop so we can use `peek` here.
                 if let transports::Addr::Ip(sockaddr) = addr
@@ -875,16 +898,16 @@ impl State {
         let addrs = to_transports_addr(self.endpoint_id, addrs);
         self.paths.insert_multiple(addrs, Source::App);
         self.paths.resolve_remote(tx);
-        // Start Address Lookup if we have no selected path.
+        // Start Address Lookup even with a selected path: it may lead to a dead instance
+        // of the remote (n0-computer/iroh#4600).
         self.trigger_address_lookup();
     }
 
     /// Triggers Address Lookup for the remote endpoint, if needed.
     ///
-    /// Does not start Address Lookup if we have a selected path or if Address Lookup is
-    /// currently running.
+    /// Does not start Address Lookup if Address Lookup is currently running.
     fn trigger_address_lookup(&mut self) {
-        if self.selected_path.is_some() || self.address_lookup_stream.is_some() {
+        if self.address_lookup_stream.is_some() {
             return;
         }
         let stream = self.address_lookup.resolve(self.endpoint_id);
@@ -1564,6 +1587,8 @@ async fn maybe_next<S: Stream + Unpin>(maybe_stream: Option<&mut S>) -> Option<O
 
 #[cfg(all(test, not(wasm_browser)))]
 mod tests {
+    use smallvec::smallvec;
+
     use super::*;
 
     #[tokio::test]
@@ -1610,5 +1635,194 @@ mod tests {
                 assert_eq!(&buf[..len], b"initial");
             }
         }
+    }
+
+    /// How the restarted host in [`restarted_host_test`] can be reached.
+    #[derive(Debug, Clone, Copy)]
+    enum Restart {
+        /// The host comes back on a different relay (relay-only endpoints).
+        Relay,
+        /// The host comes back on a different local port (relays disabled).
+        Port,
+        /// Like [`Self::Port`], but the client dials by endpoint ID only and learns the
+        /// new port from address lookup.
+        PortViaLookup,
+    }
+
+    /// A new connection must reach a host that restarted elsewhere with the same key
+    /// while an older connection to its dead instance is still open.
+    ///
+    /// The old instance vanishes without sending CONNECTION_CLOSE, so the old connection
+    /// keeps its (now dead) selected path.  See n0-computer/iroh#4600.
+    async fn restarted_host_test(restart: Restart) {
+        use std::time::Instant;
+
+        use crate::{
+            Endpoint, EndpointAddr, RelayMap, RelayMode, SecretKey,
+            address_lookup::memory::MemoryLookup,
+            endpoint::{Builder, Connection, presets},
+            tls::CaTlsConfig,
+        };
+        const ALPN: &[u8] = b"repro";
+
+        let (_, relay_a, _guard_a) = crate::test_utils::run_relay_server().await.unwrap();
+        let (_, relay_b, _guard_b) = crate::test_utils::run_relay_server().await.unwrap();
+        let host_key = SecretKey::generate();
+        let builder = move |relays: RelayMap| -> Builder {
+            let builder = Endpoint::builder(presets::Minimal)
+                .ca_tls_config(CaTlsConfig::insecure_skip_verify())
+                .alpns(vec![ALPN.to_vec()])
+                .clear_ip_transports();
+            match restart {
+                Restart::Relay => builder.relay_mode(RelayMode::Custom(relays)),
+                Restart::Port | Restart::PortViaLookup => builder
+                    .relay_mode(RelayMode::Disabled)
+                    .bind_addr((std::net::Ipv4Addr::LOCALHOST, 0))
+                    .unwrap(),
+            }
+        };
+        let host_addr = move |ep: &Endpoint, relay: &crate::RelayUrl| -> EndpointAddr {
+            match restart {
+                Restart::Relay => EndpointAddr::new(ep.id()).with_relay_url(relay.clone()),
+                Restart::Port | Restart::PortViaLookup => {
+                    EndpointAddr::new(ep.id()).with_ip_addr(ep.bound_sockets()[0])
+                }
+            }
+        };
+        async fn serve(ep: Endpoint) {
+            let mut held: Vec<Connection> = Vec::new();
+            while let Some(incoming) = ep.accept().await {
+                if let Ok(conn) = incoming.await {
+                    let echo = conn.clone();
+                    tokio::spawn(async move {
+                        while let Ok((mut send, mut recv)) = echo.accept_bi().await {
+                            let data = recv.read_to_end(64).await.unwrap_or_default();
+                            send.write_all(&data).await.ok();
+                            send.finish().ok();
+                        }
+                    });
+                    held.push(conn);
+                }
+            }
+        }
+        async fn echo(conn: &Connection) -> bool {
+            let Ok((mut send, mut recv)) = conn.open_bi().await else {
+                return false;
+            };
+            send.write_all(b"ping").await.is_ok()
+                && send.finish().is_ok()
+                && recv.read_to_end(64).await.is_ok_and(|d| d == b"ping")
+        }
+
+        // Host on relay A (or its first port), in its own runtime so it can vanish
+        // without sending CONNECTION_CLOSE.
+        let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
+        let (kill_tx, kill_rx) = tokio::sync::oneshot::channel::<()>();
+        let old_host = {
+            let host = builder(RelayMap::from(relay_a.clone())).secret_key(host_key.clone());
+            let relay_a = relay_a.clone();
+            std::thread::spawn(move || {
+                let rt = tokio::runtime::Runtime::new().unwrap();
+                rt.block_on(async move {
+                    let ep = host.bind().await.unwrap();
+                    if let Restart::Relay = restart {
+                        ep.online().await;
+                    }
+                    tokio::spawn(serve(ep.clone()));
+                    ready_tx.send(host_addr(&ep, &relay_a)).unwrap();
+                    kill_rx.await.ok();
+                    std::mem::forget(ep);
+                });
+                rt.shutdown_background(); // like kill -9: no close frames are sent
+            })
+        };
+        let old_addr = ready_rx.await.unwrap();
+
+        let lookup = MemoryLookup::new();
+        let dial_addr = |addr: EndpointAddr| match restart {
+            Restart::PortViaLookup => {
+                lookup.set_endpoint_info(addr.clone());
+                EndpointAddr::new(addr.id)
+            }
+            _ => addr,
+        };
+        let client = builder(RelayMap::from_iter([relay_a.clone(), relay_b.clone()]))
+            .address_lookup(lookup.clone())
+            .bind()
+            .await
+            .unwrap();
+        let old_conn = client.connect(dial_addr(old_addr), ALPN).await.unwrap();
+        assert!(echo(&old_conn).await, "old connection works");
+
+        kill_tx.send(()).unwrap();
+        tokio::task::spawn_blocking(move || old_host.join().unwrap())
+            .await
+            .unwrap();
+
+        // Same identity comes back on relay B (or a new port).
+        let host = builder(RelayMap::from(relay_b.clone()))
+            .secret_key(host_key.clone())
+            .bind()
+            .await
+            .unwrap();
+        if let Restart::Relay = restart {
+            host.online().await;
+        }
+        tokio::spawn(serve(host.clone()));
+        let new_addr = host_addr(&host, &relay_b);
+        let new_transport_addr = new_addr.addrs.iter().next().unwrap().clone();
+
+        // Dial the new address while the old connection is still open.
+        let start = Instant::now();
+        let res = tokio::time::timeout(Duration::from_secs(10), async {
+            let conn = client.connect(dial_addr(new_addr), ALPN).await.ok()?;
+            echo(&conn).await.then_some(conn)
+        })
+        .await;
+        println!(
+            "{restart:?}: elapsed={:?} ok={}",
+            start.elapsed(),
+            matches!(res, Ok(Some(_)))
+        );
+        let Ok(Some(new_conn)) = res else {
+            panic!("new connection never reached the restarted host ({restart:?})");
+        };
+
+        // Once the old connection is gone, its dead path must not stay selected.
+        old_conn.close(0u32.into(), b"gone");
+        let selected = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if new_conn
+                    .paths()
+                    .iter()
+                    .any(|p| p.is_selected() && *p.remote_addr() == new_transport_addr)
+                {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await;
+        assert!(
+            selected.is_ok(),
+            "live path not selected after the old connection closed ({restart:?}): {:?}",
+            new_conn.paths()
+        );
+        assert!(echo(&new_conn).await, "new connection still works");
+    }
+
+    #[tokio::test]
+    async fn new_connection_reaches_host_restarted_on_new_relay() {
+        restarted_host_test(Restart::Relay).await;
+    }
+
+    #[tokio::test]
+    async fn new_connection_reaches_host_restarted_on_new_port() {
+        restarted_host_test(Restart::Port).await;
+    }
+
+    #[tokio::test]
+    async fn new_connection_reaches_host_restarted_on_new_port_via_lookup() {
+        restarted_host_test(Restart::PortViaLookup).await;
     }
 }

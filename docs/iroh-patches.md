@@ -24,7 +24,7 @@ rows are copied from the pins `aster-rpc-internal/Cargo.toml` already carries.
 | `noq` | `noq-v1.3.0` | `aster-noq-v1.3.2` | `e75f3a5550feae0f40df0ffde8bf438f213a5156` | `upgrade/noq-v1.3.0` |
 | `iroh` | `v1.3.0` | `aster-iroh-v1.3.2` | `a4a9a76b01bcfbad573dfc3186b014efa1c2532d` | `upgrade/iroh-v1.3.0` |
 | `iroh-blobs` | `v0.103.0` | `aster-iroh-blobs-v0.103.10` | `bcd00bb2a888f3d6990ac32d9fab1d8e2d9d73f4` | `upgrade/iroh-blobs-v0.103` |
-| `iroh-docs` | `v0.101.0` | `aster-iroh-docs-v0.101.5-p1` | `ad88873ed57b1e7550ef8e091d0d7f0a947e3678` | `upgrade/iroh-docs-v0.101` |
+| `iroh-docs` | `v0.101.0` | `aster-iroh-docs-v0.101.5-p2` | `85ec38b413f62ff8169151e4a60453de17c64ed3` | `upgrade/iroh-docs-v0.101` |
 | `iroh-gossip` | `v0.101.0` | `aster-iroh-gossip-v0.101.1` | `aed725d1a6fef4e60dbe952b524c5478ec125186` | `upgrade/iroh-gossip-v0.101` |
 | `iroh-util` | `cpfix @ aef1db3` (upstream PR #5, over `iroh-util-v0.6.0`) | `aster-iroh-util-v0.6.3` | `6c42d23881459fdd07feb31287616c87c4676833` | `upgrade/iroh-util-v0.6` |
 
@@ -75,6 +75,20 @@ clippy and lib tests 124 single-threaded; iroh-blobs 133, iroh-docs 118 (sync
 27/27 twice) and iroh-gossip 25, each with clippy clean. iroh-blobs'
 `cargo fmt --check` reports existing drift in its GC patch code, which these
 commits don't touch.
+
+**2026-10-16: iroh-docs 0.101.5-p2** (`85ec38b4`, tag
+`aster-iroh-docs-v0.101.5-p2`) re-pins iroh-docs' own `[patch.crates-io]` to
+the stack Aster links it against: iroh `a4a9a76b` (1.3.2), noq `e75f3a55`
+(1.3.2), iroh-blobs `bcd00bb2` (0.103.10), and adds iroh-gossip `aed725d1`
+(0.101.1) and iroh-util `6c42d238` (0.6.3), which its lock had taken from
+crates.io as 0.101.0 and 0.6.0. Rows 29-35 had re-pinned every other fork
+without an iroh-docs run on the new stack (review finding TM-7). No source
+change; the crate stays 0.101.5. Validation on the new pins: lib 82, client 5,
+durable_set_crash 1 (1 ignored), gc 1, sync 27 (3 ignored) three times,
+sync_alreadysyncing_wedge 1, doc 1 (118 in all), all passing; clippy
+`--all-features --all-targets -D warnings` and `cargo fmt --check` clean. From
+now on, run the iroh-docs suite whenever any fork it depends on is re-pinned
+(see "Aster validation after updating pins").
 
 ### noq stack (`upgrade/noq-v1.3.0`, base `noq-v1.3.0` `c1f411562`)
 
@@ -975,6 +989,11 @@ diff <(git -C /Users/emrul/dev/aster/aster-rpc-internal show HEAD:iroh-fork-mani
 ## Aster validation after updating pins
 
 Run from `/Users/emrul/dev/aster/aster-rpc-internal`:
+
+Before re-pinning Aster, re-pin the iroh-docs fork's own `[patch.crates-io]`
+to the same revs and run its suite (`cargo test --all-features`, 118 tests
+including `tests/sync.rs`) whenever iroh, noq, iroh-blobs, iroh-gossip or
+iroh-util moves: iroh-docs is the fork that exercises all of them together.
 
 ```bash
 cargo fmt --check

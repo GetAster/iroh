@@ -25,8 +25,8 @@ rows are copied from the pins `aster-rpc-internal/Cargo.toml` already carries.
 | `iroh` | `v1.3.0` | `aster-iroh-v1.3.2` | `a4a9a76b01bcfbad573dfc3186b014efa1c2532d` | `upgrade/iroh-v1.3.0` |
 | `iroh-blobs` | `v0.103.0` | `aster-iroh-blobs-v0.103.10` | `bcd00bb2a888f3d6990ac32d9fab1d8e2d9d73f4` | `upgrade/iroh-blobs-v0.103` |
 | `iroh-docs` | `v0.101.0` | `aster-iroh-docs-v0.101.6` | `573efc68c76fdd9663c2c4e740b0c37c25480613` | `upgrade/iroh-docs-v0.101` |
-| `iroh-gossip` | `v0.101.0` | `aster-iroh-gossip-v0.101.1` | `aed725d1a6fef4e60dbe952b524c5478ec125186` | `upgrade/iroh-gossip-v0.101` |
-| `iroh-util` | `cpfix @ aef1db3` (upstream PR #5, over `iroh-util-v0.6.0`) | `aster-iroh-util-v0.6.3` | `6c42d23881459fdd07feb31287616c87c4676833` | `upgrade/iroh-util-v0.6` |
+| `iroh-gossip` | `v0.101.0` | `aster-iroh-gossip-v0.101.1-p1` | `c0e4a1f2a05ed721122f9289eb27ad8330a9182f` | `upgrade/iroh-gossip-v0.101` |
+| `iroh-util` | `cpfix @ aef1db3` (upstream PR #5, over `iroh-util-v0.6.0`) | `aster-iroh-util-v0.6.3-p1` | `eb76016080ea037464a7de71196b6de2999736b2` | `upgrade/iroh-util-v0.6` |
 
 **2026-10-14: iroh-blobs 0.103.6** (`8fa6fea6`, tag
 `aster-iroh-blobs-v0.103.6`) is the released form of row 26 (provider stall
@@ -93,6 +93,25 @@ now on, run the iroh-docs suite whenever any fork it depends on is re-pinned
 **2026-10-16: iroh-docs 0.101.6** (`573efc68`, tag `aster-iroh-docs-v0.101.6`)
 adds row 36 (the live actor survives a panicked sync or download task) on top
 of 0.101.5-p2.
+
+**2026-10-18: iroh-gossip 0.101.1-p1 and iroh-util 0.6.3-p1** re-pin the two
+remaining satellites' own `[patch.crates-io]` to the stack Aster links them
+against (review finding TM-7, found by `fork_compat.py --check`).
+iroh-gossip 0.101.1-p1 (`c0e4a1f2`, tag `aster-iroh-gossip-v0.101.1-p1`)
+moves iroh `1974e958` -> `a4a9a76b` (1.3.2) and noq `867a3a9a` -> `e75f3a55`
+(1.3.2). iroh-util 0.6.3-p1 (`eb760160`, tag `aster-iroh-util-v0.6.3-p1`)
+had no patch block and locked iroh and noq 1.0.0 from crates.io; it now pins
+iroh, iroh-base, iroh-relay to `a4a9a76b` and noq, noq-udp, noq-proto to
+`e75f3a55`, and the lock follows iroh 1.3.2's transitive moves (netwatch and
+portmapper 0.19.3, `n0-dns-resolver` in place of hickory). Gotcha:
+`cargo update -p iroh ...` kept crates.io iroh 1.0.2 and reported the patches
+unused; `cargo update -p iroh --precise 1.3.2` moved it. No source change;
+the crates stay 0.101.1 and 0.6.3, so the publisher skips them as identical.
+Validation on the new pins: iroh-gossip `cargo test --locked --all-features`
+lib 88, e2e 26, paper 25, sim 4, doc 1 (144 in all), clippy `--all-features
+--all-targets` and `--no-default-features` `-D warnings`, `cargo fmt --check`
+clean; iroh-util lib 18, clippy `--all-features --all-targets -D warnings`,
+`cargo fmt --check` and `check --examples --tests` clean.
 
 ### noq stack (`upgrade/noq-v1.3.0`, base `noq-v1.3.0` `c1f411562`)
 

@@ -24,7 +24,7 @@ rows are copied from the pins `aster-rpc-internal/Cargo.toml` already carries.
 | `noq` | `noq-v1.3.0` | `aster-noq-v1.3.2` | `e75f3a5550feae0f40df0ffde8bf438f213a5156` | `upgrade/noq-v1.3.0` |
 | `iroh` | `v1.3.0` | `aster-iroh-v1.3.2` | `a4a9a76b01bcfbad573dfc3186b014efa1c2532d` | `upgrade/iroh-v1.3.0` |
 | `iroh-blobs` | `v0.103.0` | `aster-iroh-blobs-v0.103.10` | `bcd00bb2a888f3d6990ac32d9fab1d8e2d9d73f4` | `upgrade/iroh-blobs-v0.103` |
-| `iroh-docs` | `v0.101.0` | `aster-iroh-docs-v0.101.6` | `573efc68c76fdd9663c2c4e740b0c37c25480613` | `upgrade/iroh-docs-v0.101` |
+| `iroh-docs` | `v0.101.0` | `aster-iroh-docs-v0.101.7` | `df48e8108131b78795126109e35912ac58b43e56` | `upgrade/iroh-docs-v0.101` |
 | `iroh-gossip` | `v0.101.0` | `aster-iroh-gossip-v0.101.1-p1` | `c0e4a1f2a05ed721122f9289eb27ad8330a9182f` | `upgrade/iroh-gossip-v0.101` |
 | `iroh-util` | `cpfix @ aef1db3` (upstream PR #5, over `iroh-util-v0.6.0`) | `aster-iroh-util-v0.6.3-p1` | `eb76016080ea037464a7de71196b6de2999736b2` | `upgrade/iroh-util-v0.6` |
 
@@ -112,6 +112,10 @@ lib 88, e2e 26, paper 25, sim 4, doc 1 (144 in all), clippy `--all-features
 --all-targets` and `--no-default-features` `-D warnings`, `cargo fmt --check`
 clean; iroh-util lib 18, clippy `--all-features --all-targets -D warnings`,
 `cargo fmt --check` and `check --examples --tests` clean.
+
+**2026-10-19: iroh-docs 0.101.7** (`df48e810`, tag `aster-iroh-docs-v0.101.7`)
+adds row 37 (an accept whose sync step failed no longer panics asking for
+its outcome) on top of 0.101.6.
 
 ### noq stack (`upgrade/noq-v1.3.0`, base `noq-v1.3.0` `c1f411562`)
 

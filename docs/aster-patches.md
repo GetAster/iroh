@@ -97,9 +97,9 @@ No iroh patch has been upstreamed or dropped. Related upstream changes:
 - iroh 1.0.3 (`9f951b216b`) partly overlaps row 5 (log level only, no throttle); row 5 is still carried.
 - The 1.0.1-wave noq pin commits `a9c547549e`, `ae7e3ae989`, `c29bcd6ce2`, `5228d64d91` and `b15ae80713` were replaced by `0a70368262` in the 1.3.0 port (row 3 re-expressed, not dropped).
 
-### Branches not yet triaged
+### Closed security-review branches
 
-These topic branches exist in this repository (April 2026, from an earlier security review) but are not on the current upgrade branch and have no row above. Whether each is still needed, was fixed upstream, or should be dropped has not been decided yet.
+These topic branches came from an April 2026 security review. The fixes from that review that held up were merged upstream, so these branches are not carried on the upgrade branch. They are kept for reference.
 
 | Branch |
 |---|

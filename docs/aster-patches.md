@@ -17,7 +17,7 @@ The fork manifest for the whole Aster iroh stack (noq, iroh, iroh-blobs, iroh-do
 Historical and current tag schemes in this repository:
 
 - `aster-iroh-v<version>`, for example `aster-iroh-v1.0.0-rc.0`, `aster-iroh-v1.0.1`, `aster-iroh-v1.3.2`, `aster-iroh-v1.4.0`.
-- `aster-iroh-v<version>-p<n>`, a later commit at the same crate version: docs-only retags (`aster-iroh-v1.0.0-rc.1-p1`, `-rc.1-p2`, `aster-iroh-v1.0.0-p1`; historical: docs no longer live on `upgrade/*`, so there are no more docs-only retags) or pin-only changes (`aster-iroh-v1.0.1-p1`, `aster-iroh-v1.3.0-p1`).
+- `aster-iroh-v<version>-p<n>`, a later commit at the same crate version: docs-only retags (`aster-iroh-v1.0.0-rc.1-p1`, `-rc.1-p2`, `aster-iroh-v1.0.0-p1`; historical: docs no longer live on `upgrade/*`, so there are no more docs-only retags) or pin-only changes (`aster-iroh-v1.0.1-p1`, `aster-iroh-v1.3.0-p1`, `aster-iroh-v1.4.0-p1`, `aster-iroh-v1.4.0-p2`).
 
 ## Current release
 
@@ -25,14 +25,14 @@ Historical and current tag schemes in this repository:
 |---|---|
 | Upstream base | `v1.4.0` (`55908a5809`) |
 | Integration branch | `upgrade/iroh-v1.4.0` |
-| Tag | `aster-iroh-v1.4.0` |
-| Pinned commit | `261ad623da7eb4dbdbdba2b7a20bcc178a1b7b7c` |
+| Tag | `aster-iroh-v1.4.0-p2` (re-pin to noq 1.4.2) |
+| Pinned commit | `91a92aa02bc2a06af613f3a708f84f51fe30d386` |
 | Crate version | 1.4.0 |
 | Crates pinned from this fork | `iroh`, `iroh-base`, `iroh-relay` |
 | Crates published to the Aster registry | `iroh`, `iroh-base`, `iroh-dns`, `iroh-relay` |
 | Source repository | `https://forge.emrul.dev/Aster/iroh.git` |
 
-This fork depends on the Aster noq fork at 1.4.0 (`535bd88409193ae577f445a3207351bb83525f4e`, tag `aster-noq-v1.4.0`) through row 3.
+This fork depends on the Aster noq fork at 1.4.2 (`a3c70b7afe459cbf01122928f4f90d72063ab972`, tag `aster-noq-v1.4.2`) through row 3.
 
 Registry bridges (unmodified crates.io source republished to the Aster registry with only dependency metadata rewritten, so an alternate-registry build never pulls a second copy of iroh):
 
@@ -47,9 +47,9 @@ Bootstrap pin block for source-tree builds (consumers install a versioned Aster 
 
 ```toml
 [patch.crates-io]
-iroh       = { git = "https://forge.emrul.dev/Aster/iroh.git", rev = "261ad623da7eb4dbdbdba2b7a20bcc178a1b7b7c" }
-iroh-base  = { git = "https://forge.emrul.dev/Aster/iroh.git", rev = "261ad623da7eb4dbdbdba2b7a20bcc178a1b7b7c" }
-iroh-relay = { git = "https://forge.emrul.dev/Aster/iroh.git", rev = "261ad623da7eb4dbdbdba2b7a20bcc178a1b7b7c" }
+iroh       = { git = "https://forge.emrul.dev/Aster/iroh.git", rev = "91a92aa02bc2a06af613f3a708f84f51fe30d386" }
+iroh-base  = { git = "https://forge.emrul.dev/Aster/iroh.git", rev = "91a92aa02bc2a06af613f3a708f84f51fe30d386" }
+iroh-relay = { git = "https://forge.emrul.dev/Aster/iroh.git", rev = "91a92aa02bc2a06af613f3a708f84f51fe30d386" }
 ```
 
 The workspace version spec is `iroh = "=1.4.0"`; the exact-pin version must track the fork's crate version.
@@ -67,6 +67,8 @@ Upstream `v1.4.0` already carries version 1.4.0, which Aster's registry has neve
 | `a95b697111` | build: resolve noq from the Aster 1.4.0 fork | new (row 3) |
 | `8b8ccc6359` | fix(socket): reach a remote that restarted elsewhere while an old connection is open | `-x` of `fc873f0b45` (row 30) |
 | `261ad623da` | fix(socket): derive the stateless reset key from the endpoint's secret key | `-x` of `ff98745bb6` (row 32) |
+| `41ec78b103` | build: resolve noq from the Aster 1.4.1 fork | new (row 3; tag `aster-iroh-v1.4.0-p1`) |
+| `91a92aa02b` | build: resolve noq from the Aster 1.4.2 fork | new (row 3; tag `aster-iroh-v1.4.0-p2`) |
 
 Historical: before the 2026-10-20 model, ledger and manifest docs commits were made on `upgrade/iroh-v1.3.0` after the tags, so the tags stayed code-only; they are still there (branch tip `5c18d4b041`, past the `aster-iroh-v1.3.2` tag `a4a9a76b01`). The ledger and `docs/aster-fork-manifest.toml` are not on the upstream base; they were carried over from `upgrade/iroh-v1.0.1` (tip `4b7e53fb8b`, which keeps the full 1.0.1-wave docs history), with the manifest restarted from the Aster repository's more current `iroh-fork-manifest.toml`. Under the current model the ledger lives only on `main`, the manifest only in the Aster repository as `iroh-fork-manifest.toml` (the only copy), and the copies on the upgrade branches are no longer updated.
 
@@ -76,7 +78,7 @@ Row numbers are stable patch ids shared across Aster's iroh-family forks (iroh, 
 
 | Id | Topic branch | What | Why / what in Aster depends on it | Commits (topic / upgrade) | Status | Conflict or porting notes |
 |---|---|---|---|---|---|---|
-| 3 | none recorded (original commit `7793d702a5`) | `[patch.crates-io]` entries in the root `Cargo.toml` for `noq`, `noq-udp` and `noq-proto`, pointing at the Aster noq fork (originally `https://github.com/aster-rpc/noq`, now `https://forge.emrul.dev/Aster/noq.git`) at an explicit rev; on 1.3.2 the manifests also required noq/noq-proto/noq-udp 1.3.2; upstream 1.4.0 itself requires noq 1.4.0, so row 3 is again only the patch block and lock. | iroh must build against the noq fork that contains `read_into` and `poll_driver` (noq fork rows 1 and 2) and, since 1.3.1/1.3.2, the `read_to_end` and stateless-reset fixes. | `7793d702a5` (original) / `0a70368262` (noq 1.3.0, Forgejo rev `67c13644…`), `1974e95825` (noq 1.3.1), `34136dc353` (noq 1.3.2, `-x` of `a9088cf6f8`) on `upgrade/iroh-v1.3.0`; `a95b697111` (noq 1.4.0; `Cargo.toml`, `Cargo.lock`) on `upgrade/iroh-v1.4.0` | carried | Low conflict risk. Keep until upstream noq contains equivalent APIs. Pin an explicit fork rev or tag, never a floating branch. On the 1.3.0 port upstream had appended `[workspace.metadata.cargo-semver-checks.lints]` where the old patch block lived; the new `[patch.crates-io]` follows it, both kept. Regenerate `Cargo.lock` with `cargo update -p noq -p noq-proto -p noq-udp` and check all three resolve from `git+https://forge.emrul.dev/Aster/noq.git?rev=…`. |
+| 3 | none recorded (original commit `7793d702a5`) | `[patch.crates-io]` entries in the root `Cargo.toml` for `noq`, `noq-udp` and `noq-proto`, pointing at the Aster noq fork (originally `https://github.com/aster-rpc/noq`, now `https://forge.emrul.dev/Aster/noq.git`) at an explicit rev; on 1.3.2 the manifests also required noq/noq-proto/noq-udp 1.3.2; upstream 1.4.0 itself requires noq 1.4.0, so row 3 is again only the patch block and lock. | iroh must build against the noq fork that contains `read_into` and `poll_driver` (noq fork rows 1 and 2) and, since 1.3.1/1.3.2, the `read_to_end` and stateless-reset fixes. | `7793d702a5` (original) / `0a70368262` (noq 1.3.0, Forgejo rev `67c13644…`), `1974e95825` (noq 1.3.1), `34136dc353` (noq 1.3.2, `-x` of `a9088cf6f8`) on `upgrade/iroh-v1.3.0`; `a95b697111` (noq 1.4.0; `Cargo.toml`, `Cargo.lock`), `41ec78b103` (noq 1.4.1, `aster-iroh-v1.4.0-p1`) and `91a92aa02b` (noq 1.4.2, `aster-iroh-v1.4.0-p2`) on `upgrade/iroh-v1.4.0` | carried | Low conflict risk. Keep until upstream noq contains equivalent APIs. Pin an explicit fork rev or tag, never a floating branch. On the 1.3.0 port upstream had appended `[workspace.metadata.cargo-semver-checks.lints]` where the old patch block lived; the new `[patch.crates-io]` follows it, both kept. Regenerate `Cargo.lock` with `cargo update -p noq -p noq-proto -p noq-udp` and check all three resolve from `git+https://forge.emrul.dev/Aster/noq.git?rev=…`. |
 | 4 | none recorded (original commit `a6c4e1a2fc`) | Re-exports `noq::poll_driver` as `iroh::poll_driver`. File: `iroh/src/lib.rs`. | Lets Aster FFI consumers reach the poll driver through the iroh dependency instead of importing noq directly. | `a6c4e1a2fc` (original) / `4eb058f729` on `upgrade/iroh-v1.4.0` (`-x` of `b5afe1aa30`) | carried | Low conflict risk, usually one export line near `pub use endpoint::{Endpoint, RelayMode};`. Requires the noq `poll_driver` patch. |
 | 5 | `fix/windows-busy-loop` (based on `v1.0.0`) | `Transports::poll_recv` throttles the per-transport recv-error log: the first error, then 1 in 256 with a `count=` field, reset on any successful recv, via `should_log_recv_error` + `recv_error_log_tests`. File: `iroh/src/socket/transports.rs`. | Defence in depth against recv-error log floods. It was written for the Windows `WSAECONNRESET` busy-loop (root-caused and fixed upstream in noq 1.0.1) and keeps any future recv-error storm from flooding logs. | `022676dabb` / `f0d154aca9` (1.0.0 line), `4114c449c5` (`upgrade/iroh-v1.0.1`), `52e3ef017c` (`upgrade/iroh-v1.3.0`), `b4701c812e` (`upgrade/iroh-v1.4.0`) | carried (partly absorbed upstream) | Low conflict risk. Check each upstream release for native throttling. iroh 1.0.3 (`9f951b216b`, "reduce warn logs") lowered the log from `warn!` to `debug!` but added no throttle, so a sticky error still logs on every poll at debug level. Since 1.3.0 the throttle logs at `debug!` with upstream's `transport = %$transport` field. The 1.3.0 port conflict and its resolution are in History. Test: `cargo test -p iroh --lib recv_error_log_tests`. |
 | 30 | `fix/new-connection-selected-path` (based on `1974e95825`, not on the upstream tag) | While any connection to a remote stayed open, `RemoteStateActor` sent a new connection's handshake datagrams only to the path selected for the older connection (`handle_msg_send_datagram`), skipped address lookup while a path was selected (`trigger_address_lookup`), and cleared `selected_path` only when the last connection closed (`handle_connection_close`). A remote killed without CONNECTION_CLOSE that came back with the same key on another relay or port stayed unreachable, even with the new address in the `EndpointAddr`. Now handshake datagrams go to the selected path first and then to every other known path; `ResolveRemote` starts lookup unless one is running; and `select_path` (now also run on every connection close) drops a selected path that no connection still has open. File: `iroh/src/socket/remote_map/remote_state.rs`. | Aster restart/reconnect (Aster repository, `docs/_internal/investigations/2026-10-15-restart-reconnect.md`, root cause 1): a peer restarted on a new port or relay is dialable at once instead of after 30–95 s or never. Loopback probe: new-port Docs recovery 0.4–0.8 s (was never, in 2 of 3 runs). | `26a476cee1` / `fc873f0b45`, released as 1.3.1 at `32d0a63fff`; `8b8ccc6359` (`-x` of `fc873f0b45`) on `upgrade/iroh-v1.4.0` | carried | **Stand-in for upstream n0-computer/iroh#4600 (related #4050, #4531, PR #4435). Drop when a released iroh containing the upstream fix for #4600 is pinned; re-run the restart probe to confirm.** Cost: every `connect()` to an already-connected remote now starts an address lookup (pkarr/DNS) unless one is running. Low conflict risk outside `remote_state.rs`; upstream #4551 (1.4.0) changed `remote_state.rs` and merged cleanly beside it. flub's happy-eyeballs refinement (selected-path head start, cancel lookup on `AddConnection`) was deliberately left out. Tests: three loopback repros in `remote_state::tests` (new relay, new port, new port via lookup) fail before and pass after; ablations show each of the three changes is needed. |
@@ -195,7 +197,18 @@ Before the current branch model, fork `main` mirrored upstream `main` and was re
 
 ## History
 
-### 1.4.0 wave (2026-10-21), current
+### noq 1.4.1 and 1.4.2 re-pins (2026-10-22), current
+
+| Upstream base | Tag | Pinned commit | Branch |
+|---|---|---|---|
+| `v1.4.0` (`55908a5809`) | `aster-iroh-v1.4.0-p2` | `91a92aa02bc2a06af613f3a708f84f51fe30d386` | `upgrade/iroh-v1.4.0` |
+| `v1.4.0` (`55908a5809`) | `aster-iroh-v1.4.0-p1` | `41ec78b1034aad5cb7a2b88364955965092fa541` | `upgrade/iroh-v1.4.0` |
+
+- No iroh source change; the crates stay 1.4.0 (noq requirement `^1.4.0` admits both) and are not republished. Row 3 only: `[patch.crates-io]` and `Cargo.lock`.
+- **1.4.0-p1** (`41ec78b103`): noq 1.4.1 (`13dcb5b7`, `aster-noq-v1.4.1`: BBRv3 probe fixes and BBRv3 as the default controller, receive-buffer compaction, a non-zero pacing delay).
+- **1.4.0-p2** (`91a92aa02b`): noq 1.4.2 (`a3c70b7a`, `aster-noq-v1.4.2`: incremental BBRv3 packet history, about 28 % fewer sender cycles per GiB under BBRv3). Validation: `cargo test --locked -p iroh --all-features --lib -- --test-threads=1` 142 passed, 1 ignored; clippy `--locked --workspace --all-targets --all-features -D warnings` and fmt clean.
+
+### 1.4.0 wave (2026-10-21)
 
 | Upstream base | Tag | Pinned commit | Branch |
 |---|---|---|---|

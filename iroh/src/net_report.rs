@@ -14,7 +14,7 @@ use std::{
     sync::Arc,
 };
 
-use defaults::timeouts::PROBES_TIMEOUT;
+use defaults::timeouts::{PROBES_TIMEOUT, QAD_V6_GRACE};
 use iroh_base::RelayUrl;
 #[cfg(not(wasm_browser))]
 use iroh_dns::dns::DnsResolver;
@@ -361,6 +361,16 @@ impl Client {
             )
             .await;
 
+        // When IPv6 QAD was tried and produced nothing, judge this report as
+        // IPv4-only. Otherwise a full report waits for an HTTPS probe to every
+        // relay, however slow the farthest one is.
+        #[cfg(not(wasm_browser))]
+        let if_state = IfStateDetails {
+            have_v4: if_state.have_v4,
+            have_v6: if_state.have_v6
+                && reports.iter().any(|r| matches!(r, ProbeReport::QadIpv6(_))),
+        };
+
         #[cfg(not(wasm_browser))]
         for r in reports {
             report.update(&r);
@@ -547,11 +557,21 @@ impl Client {
         let mut ipv4_pending = !v4_buf.is_empty();
         let mut ipv6_pending = !v6_buf.is_empty();
 
+        // Once IPv4 alone has enough reports, IPv6 has until `v6_deadline`
+        // (QAD_V6_GRACE after the first IPv4 report) to complete.
+        let mut first_v4_at: Option<time::Instant> = None;
+        let mut v6_deadline: Option<time::Instant> = None;
+
         while !v4_buf.is_empty() || !v6_buf.is_empty() {
             // We early-abort the tasks once we have at least `enough_relays` reports,
             // and at least one ipv4 and one ipv6 report completed (if they were started, see comment above).
+            let enough = reports.len() >= enough_relays && !ipv4_pending;
+            if enough && ipv6_pending && v6_deadline.is_none() {
+                v6_deadline = Some(first_v4_at.unwrap_or_else(time::Instant::now) + QAD_V6_GRACE);
+            }
+            let v6_given_up = v6_deadline.is_some_and(|d| time::Instant::now() >= d);
 
-            if reports.len() >= enough_relays && !ipv4_pending && !ipv6_pending {
+            if enough && (!ipv6_pending || v6_given_up) {
                 debug!("enough probes: {}", reports.len());
                 cancel_v4.cancel();
                 cancel_v6.cancel();
@@ -566,6 +586,12 @@ impl Client {
                     break;
                 }
 
+                _ = time::sleep_until(v6_deadline.unwrap_or_else(time::Instant::now)),
+                    if v6_deadline.is_some() && !v6_given_up =>
+                {
+                    debug!("no IPv6 QAD report within the grace period");
+                }
+
                 val = v4_buf.join_next(), if !v4_buf.is_empty() => {
                     let span = info_span!("QADv4");
                     let _guard = span.enter();
@@ -576,6 +602,7 @@ impl Client {
                                 Ok((r, conn)) => {
                                     debug!(?r, "probe report");
                                     let url = r.relay.clone();
+                                    first_v4_at.get_or_insert_with(time::Instant::now);
                                     reports.push(ProbeReport::QadIpv4(r));
                                     if self.qad_conns.v4.is_none() {
                                         self.qad_conns.v4.replace((url, conn));
@@ -1108,6 +1135,139 @@ mod tests {
             .unwrap_or_else(|err| panic!("{err}"));
         assert_eq!(observed, client_addr);
         assert_eq!(report.addr, client_addr);
+    }
+
+    /// Resolves every `relay-<n>.test` name to loopback: IPv4 to 127.0.0.1
+    /// and IPv6 to ::1.
+    #[derive(Debug, Clone)]
+    struct LoopbackResolver;
+
+    impl iroh_dns::dns::Resolver for LoopbackResolver {
+        fn lookup_ipv4(
+            &self,
+            _host: String,
+        ) -> n0_future::boxed::BoxFuture<
+            Result<iroh_dns::dns::BoxIter<Ipv4Addr>, iroh_dns::dns::DnsError>,
+        > {
+            Box::pin(async { Ok(Box::new([Ipv4Addr::LOCALHOST].into_iter()) as _) })
+        }
+
+        fn lookup_ipv6(
+            &self,
+            _host: String,
+        ) -> n0_future::boxed::BoxFuture<
+            Result<iroh_dns::dns::BoxIter<std::net::Ipv6Addr>, iroh_dns::dns::DnsError>,
+        > {
+            Box::pin(async { Ok(Box::new([std::net::Ipv6Addr::LOCALHOST].into_iter()) as _) })
+        }
+
+        fn lookup_txt(
+            &self,
+            _host: String,
+        ) -> n0_future::boxed::BoxFuture<
+            Result<iroh_dns::dns::BoxIter<iroh_dns::dns::TxtRecordData>, iroh_dns::dns::DnsError>,
+        > {
+            Box::pin(async { Ok(Box::new(std::iter::empty()) as _) })
+        }
+
+        fn clear_cache(&self) {}
+
+        fn reset(&self) -> Box<dyn iroh_dns::dns::Resolver> {
+            Box::new(self.clone())
+        }
+    }
+
+    /// A host with IPv6 whose IPv6 UDP never answers (some VPN tunnels) must
+    /// not hold the first report for `PROBES_TIMEOUT`. Each relay's IPv6
+    /// address is a UDP socket that swallows packets, and its HTTPS port a TCP
+    /// listener that never answers, so only the QAD IPv4 reports can complete
+    /// the report.
+    #[tokio::test(flavor = "multi_thread")]
+    #[traced_test]
+    async fn ipv6_udp_blackhole_does_not_hold_the_report() -> Result<()> {
+        use std::net::Ipv6Addr;
+
+        match std::net::UdpSocket::bind((Ipv6Addr::LOCALHOST, 0)) {
+            Ok(_) => {}
+            Err(err) if err.kind() == std::io::ErrorKind::AddrNotAvailable => {
+                eprintln!("skipping: IPv6 loopback is unavailable ({err})");
+                return Ok(());
+            }
+            Err(err) => panic!("failed to bind IPv6 loopback: {err}"),
+        }
+
+        let mut servers = Vec::new();
+        let mut blackholes = Vec::new();
+        let mut silent_https = Vec::new();
+        let mut relays = Vec::new();
+        for i in 0..3 {
+            let (server, relay) = test_utils::relay().await;
+            let quic_port = relay.quic.as_ref().expect("quic").port;
+            // Same port on ::1: QADv6 lands here and is never answered.
+            blackholes.push(
+                tokio::net::UdpSocket::bind((Ipv6Addr::LOCALHOST, quic_port))
+                    .await
+                    .anyerr()?,
+            );
+            let https = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+                .await
+                .anyerr()?;
+            let https_port = https.local_addr().anyerr()?.port();
+            silent_https.push(https);
+            let url: RelayUrl = format!("https://relay-{i}.test:{https_port}")
+                .parse()
+                .anyerr()?;
+            relays.push(RelayConfig::new(url, relay.quic.clone()));
+            servers.push(server);
+        }
+        let relay_map = RelayMap::from_iter(relays);
+
+        let ep = noq::Endpoint::client((Ipv6Addr::UNSPECIFIED, 0).into()).anyerr()?;
+        let quic_config = QuicConfig {
+            ep: ep.clone(),
+            client_config: iroh_relay::tls::make_dangerous_client_config(),
+            ipv4: true,
+            ipv6: true,
+        };
+        let tls_config = CaTlsConfig::insecure_skip_verify()
+            .client_config(default_provider())
+            .expect("infallible");
+        let opts = Options::new(tls_config)
+            .quic_config(Some(quic_config))
+            .net_report_config(NetReportConfig {
+                https_probes: true,
+                ..NetReportConfig::minimal()
+            });
+        let mut client = Client::new(
+            DnsResolver::custom(LoopbackResolver),
+            relay_map,
+            opts,
+            Default::default(),
+        );
+
+        let cancel = CancellationToken::new();
+        let start = Instant::now();
+        let report = client
+            .get_report(IfStateDetails::fake(), true, cancel.child_token())
+            .await;
+        let elapsed = start.elapsed();
+        cancel.cancel();
+
+        assert!(
+            elapsed < PROBES_TIMEOUT,
+            "report took {elapsed:?}, the IPv6 probes held it"
+        );
+        assert!(report.udp_v4, "IPv4 QAD answered");
+        assert!(!report.udp_v6, "IPv6 QAD never answered");
+        assert!(report.preferred_relay.is_some(), "a home relay was chosen");
+
+        drop(client);
+        ep.close(0u32.into(), b"test complete");
+        ep.wait_idle().await;
+        for server in servers {
+            server.shutdown().await?;
+        }
+        Ok(())
     }
 
     #[tokio::test(flavor = "multi_thread")]

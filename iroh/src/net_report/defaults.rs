@@ -22,6 +22,14 @@ pub(crate) mod timeouts {
     /// start at different times based on the ProbePlan.
     pub(crate) const PROBES_TIMEOUT: Duration = Duration::from_secs(3);
 
+    /// How long QAD keeps waiting for an IPv6 report once IPv4 has enough,
+    /// counted from the first IPv4 report.
+    ///
+    /// A host can have IPv6 routes that drop UDP (some VPN tunnels do). Its
+    /// IPv6 probes never answer, and without this bound every report would
+    /// wait for [`PROBES_TIMEOUT`] before choosing a home relay.
+    pub(crate) const QAD_V6_GRACE: Duration = Duration::from_millis(250);
+
     /// How long to await for a captive-portal result.
     ///
     /// This delay is chosen so it starts after good-working QAD probes

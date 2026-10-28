@@ -60,6 +60,6 @@ type_marked_deprecated = { required-update = "minor" }
 type_method_marked_deprecated = { required-update = "minor" }
 
 [patch.crates-io]
-noq = { git = "https://forge.emrul.dev/Aster/noq.git", rev = "de89867c975192d69438164bada087506133c5a4" }
-noq-udp = { git = "https://forge.emrul.dev/Aster/noq.git", rev = "de89867c975192d69438164bada087506133c5a4" }
-noq-proto = { git = "https://forge.emrul.dev/Aster/noq.git", rev = "de89867c975192d69438164bada087506133c5a4" }
+noq = { git = "https://forge.emrul.dev/Aster/noq.git", rev = "379f73677c057908b7e43a40466e38d2bbe75630" }
+noq-udp = { git = "https://forge.emrul.dev/Aster/noq.git", rev = "379f73677c057908b7e43a40466e38d2bbe75630" }
+noq-proto = { git = "https://forge.emrul.dev/Aster/noq.git", rev = "379f73677c057908b7e43a40466e38d2bbe75630" }

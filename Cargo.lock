@@ -2195,7 +2195,7 @@ dependencies = [
 
 [[package]]
 name = "iroh"
-version = "1.4.2001"
+version = "1.4.2002"
 dependencies = [
  "assert_matches",
  "axum",
@@ -2263,7 +2263,7 @@ dependencies = [
 
 [[package]]
 name = "iroh-base"
-version = "1.4.2001"
+version = "1.4.2002"
 dependencies = [
  "curve25519-dalek",
  "data-encoding",
@@ -2285,7 +2285,7 @@ dependencies = [
 
 [[package]]
 name = "iroh-bench"
-version = "1.4.2001"
+version = "1.4.2002"
 dependencies = [
  "bytes",
  "clap",
@@ -2304,7 +2304,7 @@ dependencies = [
 
 [[package]]
 name = "iroh-dns"
-version = "1.4.2001"
+version = "1.4.2002"
 dependencies = [
  "arc-swap",
  "cfg_aliases",
@@ -2328,7 +2328,7 @@ dependencies = [
 
 [[package]]
 name = "iroh-dns-server"
-version = "1.4.2001"
+version = "1.4.2002"
 dependencies = [
  "async-trait",
  "axum",
@@ -2422,7 +2422,7 @@ dependencies = [
 
 [[package]]
 name = "iroh-relay"
-version = "1.4.2001"
+version = "1.4.2002"
 dependencies = [
  "axum",
  "blake3",
@@ -3153,8 +3153,8 @@ checksum = "38bf9645c8b145698bb0b18a4637dcacbc421ea49bef2317e4fd8065a387cf21"
 
 [[package]]
 name = "noq"
-version = "1.4.2"
-source = "git+https://forge.emrul.dev/Aster/noq.git?rev=a3c70b7afe459cbf01122928f4f90d72063ab972#a3c70b7afe459cbf01122928f4f90d72063ab972"
+version = "1.4.3"
+source = "git+https://forge.emrul.dev/Aster/noq.git?rev=de89867c975192d69438164bada087506133c5a4#de89867c975192d69438164bada087506133c5a4"
 dependencies = [
  "bytes",
  "cfg_aliases",
@@ -3174,8 +3174,8 @@ dependencies = [
 
 [[package]]
 name = "noq-proto"
-version = "1.4.2"
-source = "git+https://forge.emrul.dev/Aster/noq.git?rev=a3c70b7afe459cbf01122928f4f90d72063ab972#a3c70b7afe459cbf01122928f4f90d72063ab972"
+version = "1.4.3"
+source = "git+https://forge.emrul.dev/Aster/noq.git?rev=de89867c975192d69438164bada087506133c5a4#de89867c975192d69438164bada087506133c5a4"
 dependencies = [
  "aes-gcm",
  "aws-lc-rs",
@@ -3204,8 +3204,8 @@ dependencies = [
 
 [[package]]
 name = "noq-udp"
-version = "1.4.2"
-source = "git+https://forge.emrul.dev/Aster/noq.git?rev=a3c70b7afe459cbf01122928f4f90d72063ab972#a3c70b7afe459cbf01122928f4f90d72063ab972"
+version = "1.4.3"
+source = "git+https://forge.emrul.dev/Aster/noq.git?rev=de89867c975192d69438164bada087506133c5a4#de89867c975192d69438164bada087506133c5a4"
 dependencies = [
  "cfg_aliases",
  "libc",
@@ -4885,7 +4885,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",

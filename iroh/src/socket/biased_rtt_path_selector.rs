@@ -133,6 +133,14 @@ impl BiasedRttPathSelector {
     }
 }
 
+/// Paths are compared by minimum RTT, not smoothed RTT.
+///
+/// The smoothed RTT of the path carrying a bulk transfer includes its own queueing delay,
+/// while a newly validated path starts from a single probe sample, so comparing smoothed
+/// RTTs makes the selector abandon the busy path mid-transfer.  The minimum RTT is not
+/// inflated by queueing.  It never rises, so a path whose base latency later grows keeps
+/// winning; that is accepted because the selector already ignores differences below
+/// [`RTT_SWITCHING_MIN`] and a windowed minimum would be inflated again under bulk transfer.
 impl PathSelector for BiasedRttPathSelector {
     fn select(&self, ctx: &PathSelectionContext<'_>) -> PathSelection {
         // Single pass: track the best candidate by sort key, and the best (lowest)
@@ -150,7 +158,7 @@ impl PathSelector for BiasedRttPathSelector {
             let Some(stats) = psd.stats() else {
                 continue;
             };
-            let rtt = stats.rtt;
+            let rtt = stats.min_rtt;
             trace!(%network_path, ?rtt);
             let key = self.sort_key(network_path, rtt);
 
@@ -224,9 +232,18 @@ mod tests {
     }
 
     fn psd(addr: &transports::FourTuple, rtt_ms: u64) -> PathSelectionData<'_> {
+        psd_with_min(addr, rtt_ms, rtt_ms)
+    }
+
+    fn psd_with_min(
+        addr: &transports::FourTuple,
+        rtt_ms: u64,
+        min_rtt_ms: u64,
+    ) -> PathSelectionData<'_> {
         // PathStats is #[non_exhaustive], so build via Default + field assignment.
         let mut stats = PathStats::default();
         stats.rtt = Duration::from_millis(rtt_ms);
+        stats.min_rtt = Duration::from_millis(min_rtt_ms);
         PathSelectionData::for_test(addr, Some(stats))
     }
 
@@ -300,6 +317,27 @@ mod tests {
 
         // 6ms diff > 5ms → switch.
         let chosen = select_with_default(Some(&v4_1), vec![psd(&v4_1, 20), psd(&v4_2, 14)]);
+        assert_eq!(chosen.as_ref(), Some(&v4_2));
+    }
+
+    #[test]
+    fn queue_inflated_rtt_does_not_trigger_switch() {
+        let v4_1 = v4(1);
+        let v4_2 = v4(2);
+
+        // The current path's smoothed RTT is inflated by its own queue; its minimum RTT
+        // equals the candidate's, so there is nothing to gain by switching.
+        let chosen = select_with_default(
+            Some(&v4_1),
+            vec![psd_with_min(&v4_1, 140, 100), psd_with_min(&v4_2, 100, 100)],
+        );
+        assert_eq!(chosen, None);
+
+        // A candidate with a meaningfully lower minimum RTT still wins.
+        let chosen = select_with_default(
+            Some(&v4_1),
+            vec![psd_with_min(&v4_1, 140, 100), psd_with_min(&v4_2, 90, 90)],
+        );
         assert_eq!(chosen.as_ref(), Some(&v4_2));
     }
 

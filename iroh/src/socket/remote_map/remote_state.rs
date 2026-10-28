@@ -773,12 +773,13 @@ impl RemoteStateActor {
         for conn_state in self.connections.values() {
             let mut is_conn_goodenough = false;
             if let Some(conn) = conn_state.handle.upgrade() {
+                // Minimum RTT: a queue built by our own traffic must not look like a slow link.
                 let min_ip_rtt = conn_state
                     .paths
                     .iter()
                     .filter_map(|(path_id, addr)| {
                         if addr.is_ip() {
-                            conn.path_stats(*path_id).map(|stats| stats.rtt)
+                            conn.path_stats(*path_id).map(|stats| stats.min_rtt)
                         } else {
                             None
                         }

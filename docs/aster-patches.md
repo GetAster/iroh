@@ -25,7 +25,7 @@ Historical and current tag schemes in this repository:
 |---|---|
 | Upstream base | `v1.4.1` (`d6c6963b96`) |
 | Integration branch | `upgrade/iroh-v1.4.1` |
-| Tag | `aster-iroh-v1.4.2003`  (`aster-iroh-v1.4.2002` is the previous release) |
+| Tag | `aster-iroh-v1.4.2003` (`aster-iroh-v1.4.2002` is the previous release) |
 | Pinned commit | `370b544341c076a738b8a888e51e012d6b438af5` |
 | Crate version | 1.4.2003 |
 | Crates pinned from this fork | `iroh`, `iroh-base`, `iroh-relay` |

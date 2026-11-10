@@ -25,7 +25,7 @@ Historical and current tag schemes in this repository:
 |---|---|
 | Upstream base | `v1.4.1` (`d6c6963b96`) |
 | Integration branch | `upgrade/iroh-v1.4.1` |
-| Tag | `aster-iroh-v1.4.2003` (to be created after the Aster release candidate passes; `aster-iroh-v1.4.2002` is the previous release) |
+| Tag | `aster-iroh-v1.4.2003`  (`aster-iroh-v1.4.2002` is the previous release) |
 | Pinned commit | `370b544341c076a738b8a888e51e012d6b438af5` |
 | Crate version | 1.4.2003 |
 | Crates pinned from this fork | `iroh`, `iroh-base`, `iroh-relay` |
@@ -75,7 +75,7 @@ Upstream 1.4.1 plus row 44 publishes as 1.4.2001 under the version rule, set by 
 | `34ad5b111e` | chore: release 1.4.2002 on noq 1.4.3 | new (superseded before tagging: required noq 1.4.3, outside the fork version rule; never tagged or published) |
 | `9ba1447d2a` | chore: require noq 1.4.1001 under the fork version rule | new (row 3: requires noq 1.4.1001 and pins `379f73677c`; every crate 1.4.2002; tag `aster-iroh-v1.4.2002`) |
 | `456ceb374e` | fix(iroh): match the selected path by remote address on every connection | `-x` of `303f6f1aa8` (row `route-match-ignores-local`) |
-| `370b544341` | chore: release 1.4.2003 on noq 1.4.1002 | new (row 3: requires noq 1.4.1002 and pins `4e193fb2d`; every crate 1.4.2003; tag `aster-iroh-v1.4.2003`, to be created) |
+| `370b544341` | chore: release 1.4.2003 on noq 1.4.1002 | new (row 3: requires noq 1.4.1002 and pins `4e193fb2d`; every crate 1.4.2003; tag `aster-iroh-v1.4.2003`) |
 
 Historical: before the 2026-10-20 model, ledger and manifest docs commits were made on `upgrade/iroh-v1.3.0` after the tags, so the tags stayed code-only; they are still there (branch tip `5c18d4b041`, past the `aster-iroh-v1.3.2` tag `a4a9a76b01`). The ledger and `docs/aster-fork-manifest.toml` are not on the upstream base; they were carried over from `upgrade/iroh-v1.0.1` (tip `4b7e53fb8b`, which keeps the full 1.0.1-wave docs history), with the manifest restarted from the Aster repository's more current `iroh-fork-manifest.toml`. Under the current model the ledger lives only on `main`, the manifest only in the Aster repository as `iroh-fork-manifest.toml` (the only copy), and the copies on the upgrade branches are no longer updated.
 
@@ -213,7 +213,7 @@ Before the current branch model, fork `main` mirrored upstream `main` and was re
 
 | Upstream base | Tag | Pinned commit | Branch |
 |---|---|---|---|
-| `v1.4.1` (`d6c6963b96`) | `aster-iroh-v1.4.2003` (to be created after the Aster release candidate passes) | `370b544341c076a738b8a888e51e012d6b438af5` | `upgrade/iroh-v1.4.1` |
+| `v1.4.1` (`d6c6963b96`) | `aster-iroh-v1.4.2003` | `370b544341c076a738b8a888e51e012d6b438af5` | `upgrade/iroh-v1.4.1` |
 
 - The "vpn-paths" wave. Row `route-match-ignores-local` (`456ceb374e`) is a code change, so it takes the next version under the fork version rule: 1.4.2003. Every crate in the workspace is bumped and requires noq 1.4.1002; `[patch.crates-io]` and `Cargo.lock` name noq `4e193fb2d` (tag `aster-noq-v1.4.1002`).
 - Suites: iroh lib 144 passed (1 ignored); patchbay 67 passed (11 ignored), 0 failed.

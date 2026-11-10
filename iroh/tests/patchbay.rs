@@ -26,17 +26,25 @@
 // via a cfg directive
 #![cfg(all(target_os = "linux", not(skip_patchbay)))]
 
-use std::{net::Ipv4Addr, time::Duration};
+use std::{
+    net::Ipv4Addr,
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
+    time::Duration,
+};
 
 use ipnet::Ipv4Net;
-use iroh::endpoint::Side;
-use n0_error::{Result, StackResultExt};
+use iroh::endpoint::{PathEvent, Side};
+use n0_error::{Result, StackResultExt, StdResultExt};
+use n0_future::StreamExt;
 use n0_tracing_test::traced_test;
 use patchbay::{IfaceConfig, LinkCondition, LinkDirection, Nat};
 use testdir::testdir;
 use tracing::info;
 
-use self::util::{Pair, PathConnectionExt, lab_with_relay, ping_accept, ping_open};
+use self::util::{Pair, PathConnectionExt, TEST_ALPN, lab_with_relay, ping_accept, ping_open};
 use crate::util::is_relayed;
 
 // Because we're in an integration test, we can't declare modules under patchbay/
@@ -186,6 +194,162 @@ async fn add_faster_link_client() -> Result {
 #[traced_test]
 async fn add_faster_link_server() -> Result {
     run_add_faster_link(Side::Server).await
+}
+
+/// Routes all traffic through a second uplink while the first keeps the default route.
+///
+/// This is a VPN coming up over Wi-Fi: it adds `0.0.0.0/1` and `128.0.0.0/1` and
+/// leaves the default route alone, so the old interface keeps its address while
+/// packets leave from the new one and noq migrates the open path's local address.
+/// A second connection made afterwards, dialled by either side, must settle on one
+/// path to the peer, not reopen the old connection's path from the old address and
+/// close it as redundant in a loop.
+async fn run_vpn_routes_over_wifi(switching_side: Side, vpn_dials_second: bool) -> Result {
+    let (lab, relay_map, _relay_guard, guard) = lab_with_relay(testdir!()).await?;
+    let wifi = lab.add_router("wifi").nat(Nat::Open).build().await?;
+    let vpn = lab.add_router("vpn").nat(Nat::Open).build().await?;
+    let public = lab.add_router("public").nat(Nat::None).build().await?;
+
+    let switcher = lab
+        .add_device("switcher")
+        .iface("eth0", wifi.id())
+        .iface("eth1", vpn.id())
+        .default_via("eth0")
+        .build()
+        .await?;
+    let peer = lab.add_device("peer").uplink(public.id()).build().await?;
+    let vpn_gw = vpn.downstream_gw().context("vpn gateway")?.to_string();
+
+    let timeout = Duration::from_secs(15);
+    let settle = Duration::from_secs(10);
+    Pair::new(relay_map)
+        .left(switching_side, switcher, async move |dev, ep, conn| {
+            conn.wait_ip(timeout).await.context("initial holepunch")?;
+            ping_accept(&conn, timeout)
+                .await
+                .context("ping_accept before switch")?;
+
+            info!("route everything through eth1, keeping the default route on eth0");
+            let wifi_ip = dev.iface("eth0").and_then(|i| i.ip()).context("eth0 ip")?;
+            let vpn_ip = dev.iface("eth1").and_then(|i| i.ip()).context("eth1 ip")?;
+            // Linux sends from the source noq pins (IP_PKTINFO); macOS ignores it and
+            // takes the route's source. Rewrite the source on eth1 to behave like macOS.
+            let script = format!(
+                "ip route add 0.0.0.0/1 via {vpn_gw} dev eth1 && \
+                 ip route add 128.0.0.0/1 via {vpn_gw} dev eth1 && \
+                 nft add table ip vpn && \
+                 nft add chain ip vpn out '{{ type filter hook postrouting priority 300; }}' && \
+                 nft add rule ip vpn out oifname eth1 ip saddr {wifi_ip} ip saddr set {vpn_ip}"
+            );
+            let mut cmd = tokio::process::Command::new("sh");
+            cmd.args(["-c", &script]);
+            let status = dev.spawn_command(cmd)?.wait().await?;
+            assert!(status.success(), "route the VPN: {status}");
+            // Let the open path migrate before the second connection.
+            ping_accept(&conn, timeout)
+                .await
+                .context("ping_accept after switch")?;
+            let second = if vpn_dials_second {
+                ep.connect(conn.remote_id(), TEST_ALPN)
+                    .await
+                    .context("second connection")?
+            } else {
+                ep.accept()
+                    .await
+                    .context("second incoming")?
+                    .accept()
+                    .anyerr()?
+                    .await
+                    .context("second connection")?
+            };
+            let opened = Arc::new(AtomicUsize::new(0));
+            for c in [&conn, &second] {
+                let mut events = c.path_events();
+                let opened = opened.clone();
+                tokio::spawn(async move {
+                    while let Some(event) = events.next().await {
+                        if let PathEvent::Opened { .. } = event {
+                            opened.fetch_add(1, Ordering::Relaxed);
+                        }
+                    }
+                });
+            }
+            ping_accept(&second, timeout)
+                .await
+                .context("ping_accept on the second connection")?;
+            tokio::time::sleep(settle).await;
+            let opened = opened.load(Ordering::Relaxed);
+            info!(opened, "paths opened after the second connection");
+            // A handful of paths for the new route; the loop opens several per second.
+            assert!(
+                opened <= 8,
+                "{opened} paths opened in {settle:?}: path churn"
+            );
+            ping_accept(&second, timeout)
+                .await
+                .context("ping_accept on the second connection after settling")?;
+            conn.closed().await;
+            Ok(())
+        })
+        .right(peer, async move |_dev, ep, conn| {
+            conn.wait_ip(timeout).await.context("initial holepunch")?;
+            ping_open(&conn, timeout)
+                .await
+                .context("ping_open before switch")?;
+            ping_open(&conn, timeout)
+                .await
+                .context("ping_open after switch")?;
+            let second = if vpn_dials_second {
+                ep.accept()
+                    .await
+                    .context("second incoming")?
+                    .accept()
+                    .anyerr()?
+                    .await
+                    .context("second connection")?
+            } else {
+                ep.connect(conn.remote_id(), TEST_ALPN)
+                    .await
+                    .context("second connection")?
+            };
+            ping_open(&second, timeout)
+                .await
+                .context("ping_open on the second connection")?;
+            ping_open(&second, timeout + settle)
+                .await
+                .context("ping_open on the second connection after settling")?;
+            drop(second);
+            conn.close(0u32.into(), b"bye");
+            Ok(())
+        })
+        .run()
+        .await?;
+    guard.ok();
+    Ok(())
+}
+
+#[tokio::test]
+#[traced_test]
+async fn vpn_routes_over_wifi_client_dials() -> Result {
+    run_vpn_routes_over_wifi(Side::Client, true).await
+}
+
+#[tokio::test]
+#[traced_test]
+async fn vpn_routes_over_wifi_server_dials() -> Result {
+    run_vpn_routes_over_wifi(Side::Server, true).await
+}
+
+#[tokio::test]
+#[traced_test]
+async fn vpn_routes_over_wifi_client_accepts() -> Result {
+    run_vpn_routes_over_wifi(Side::Client, false).await
+}
+
+#[tokio::test]
+#[traced_test]
+async fn vpn_routes_over_wifi_server_accepts() -> Result {
+    run_vpn_routes_over_wifi(Side::Server, false).await
 }
 
 /// Takes one side's link down after holepunching, then brings it back.

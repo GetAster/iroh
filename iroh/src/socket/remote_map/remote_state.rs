@@ -699,6 +699,23 @@ impl RemoteStateActor {
             self.state
                 .open_path_on_conn(*conn_id, conn_state, &conn, &selected);
 
+            // The path this connection keeps for the selected route: the exact four-tuple
+            // if it has one, else its oldest path to the same remote.
+            let keep = conn_state
+                .paths
+                .iter()
+                .filter(|(_, tuple)| **tuple == selected)
+                .map(|(path_id, _)| *path_id)
+                .min()
+                .or_else(|| {
+                    conn_state
+                        .paths
+                        .iter()
+                        .filter(|(_, tuple)| same_route(tuple, &selected))
+                        .map(|(path_id, _)| *path_id)
+                        .min()
+                });
+
             for (path_id, path_fourtuple) in conn_state.paths.iter() {
                 let Some(path) = conn.path(*path_id) else {
                     continue;
@@ -711,7 +728,7 @@ impl RemoteStateActor {
                 // and racing to abandon the last one.
                 if conn.side().is_client()
                     && path_fourtuple.is_ip()
-                    && path_fourtuple != &selected
+                    && Some(*path_id) != keep
                     && conn_state.paths.values().filter(|a| a.is_ip()).count() > 1
                 {
                     trace!(?path_fourtuple, %conn_id, %path_id, "closing direct path");
@@ -730,13 +747,23 @@ impl RemoteStateActor {
                     continue;
                 }
 
-                // Set path status: The selected path becomes Available, all other paths
-                // become Backup.
-                self.state.set_path_status(*conn_id, &path, path_fourtuple);
+                // Set path status: the kept path becomes Available, all other paths
+                // become Backup, so a connection has one Available path even when two
+                // share the selected route.
+                let status = if Some(*path_id) == keep {
+                    PathStatus::Available
+                } else {
+                    PathStatus::Backup
+                };
+                self.state
+                    .set_path_status(*conn_id, &path, path_fourtuple, status);
             }
 
             // Record the new selected path in the path watcher.
-            conn_state.path_state.record_selected(&selected);
+            let kept = keep.and_then(|path_id| conn_state.paths.get(&path_id));
+            conn_state
+                .path_state
+                .record_selected(kept.unwrap_or(&selected));
         }
     }
 
@@ -1017,7 +1044,8 @@ impl State {
             debug!(?e, "failed to set relay path idle timeout");
         }
 
-        self.set_path_status(conn_id, path, &network_path);
+        let status = self.path_status_for_addr(&network_path);
+        self.set_path_status(conn_id, path, &network_path, status);
         self.paths
             .insert_open_path(network_path.remote(), Source::Connection);
         Some(network_path)
@@ -1028,8 +1056,8 @@ impl State {
         conn_id: ConnId,
         path: &noq::Path,
         network_path: &transports::FourTuple,
+        status: PathStatus,
     ) {
-        let status = self.path_status_for_addr(network_path);
         match path.set_status(status) {
             Err(error) => warn!(?error, ?network_path, ?status, "set_status failed"),
             Ok(prev_status) if prev_status != status => {
@@ -1061,7 +1089,11 @@ impl State {
             return;
         }
         // Already open on this connection; nothing to do.
-        if conn_state.paths.values().any(|a| a == open_4tuple) {
+        if conn_state
+            .paths
+            .values()
+            .any(|a| same_route(a, open_4tuple))
+        {
             return;
         }
 
@@ -1096,10 +1128,14 @@ impl State {
 
     /// Returns the [`PathStatus`] for `addr`.
     ///
-    /// Returns [`PathStatus::Available`] if `addr` is the currently-selected path,
-    /// or [`PathStatus::Backup`] otherwise.
+    /// Returns [`PathStatus::Available`] if `addr` is the same route as the selected path
+    /// (see [`same_route`]), or [`PathStatus::Backup`] otherwise.
     fn path_status_for_addr(&self, addr: &transports::FourTuple) -> PathStatus {
-        if Some(addr) == self.selected_path.as_ref() {
+        if self
+            .selected_path
+            .as_ref()
+            .is_some_and(|selected| same_route(selected, addr))
+        {
             PathStatus::Available
         } else {
             PathStatus::Backup
@@ -1557,6 +1593,23 @@ fn to_transports_addr(
             None
         }
     })
+}
+
+/// Whether two four-tuples are the same route to the remote.
+///
+/// IP paths match on the remote address alone. The local address is the OS's choice
+/// and can change under an open path without an event: when a VPN takes the routes,
+/// noq migrates the path to the tunnel's address (passive migration), and a path opened
+/// from the old address migrates as soon as a reply arrives. Matching the local address
+/// too reopens and closes such a path in a loop.
+fn same_route(a: &transports::FourTuple, b: &transports::FourTuple) -> bool {
+    match (a, b) {
+        (
+            transports::FourTuple::Ip { remote: a, .. },
+            transports::FourTuple::Ip { remote: b, .. },
+        ) => a == b,
+        _ => a == b,
+    }
 }
 
 /// Returns the next item if `maybe_stream` is `Some`, or `None` otherwise.

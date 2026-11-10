@@ -15,7 +15,7 @@ use tracing::{Instrument, debug, error, error_span, event, info};
 
 use self::relay::run_relay_server;
 
-const TEST_ALPN: &[u8] = b"test";
+pub(crate) const TEST_ALPN: &[u8] = b"test";
 
 /// Upper bound on waiting for the peer task at the end-of-run barrier in [`Pair::run`].
 ///

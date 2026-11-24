@@ -238,7 +238,7 @@ Before the current branch model, fork `main` mirrored upstream `main` and was re
 
 - Same day as 1.5.1001, after consumers moved: row `relay-requirement` (`22c711d9c7`) makes iroh require iroh-relay 1.5.1002 instead of upstream's `^1.4.2`. Every member crate moves to 1.5.1002; noq stays 1.5.1001. No source change: `git diff b010df8a b0fac795` touches only `Cargo.toml` files and `Cargo.lock` (member versions).
 - Checks: `cargo check -p iroh -p iroh-relay --all-targets --locked`; Aster's workspace `cargo check --all-targets --locked` on it; `publish-native-stack.py check` passes with the new sibling-requirement rule, which fails on 1.5.1001's metadata (iroh-relay ^1.4.2) and on no other fork crate (33 checked). Suites are 1.5.1001's: the code is identical.
-- Satellites are not re-pinned: they require iroh `^1` from the registry, and Aster pins iroh exactly.
+- Satellites re-pinned to it (no version change, `-p` tags): iroh-util `-p3` (`489f339d`), iroh-gossip `-p1` (`c94c9f07`), iroh-blobs `-p1` (`da0a972e`), iroh-docs `-p1` (`716d8317`).
 
 ### 1.5.1001: iroh 1.5.0 on noq 1.5.1001 (2026-11-24)
 
